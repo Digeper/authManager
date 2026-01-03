@@ -1,0 +1,226 @@
+swagger: "2.0"
+info:
+  title: AuthorizationManager API
+  description: REST API for the AuthorizationManager service that handles user authentication and management with JWT tokens
+  version: 1.0.0
+  contact:
+    name: Muzika Platform
+host: api.example.com:8091
+basePath: /
+schemes:
+  - http
+  - https
+tags:
+  - name: user
+    description: User management endpoints
+  - name: authentication
+    description: Authentication endpoints
+paths:
+  /user:
+    post:
+      tags:
+        - user
+      summary: Create a new user
+      description: Register a new user with username, password, and optional email. Password will be hashed using BCrypt.
+      operationId: createUser
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          description: User registration data
+          required: true
+          schema:
+            $ref: "#/definitions/CreateUserRequest"
+      responses:
+        "201":
+          description: User created successfully
+          schema:
+            $ref: "#/definitions/UserResponse"
+        "400":
+          description: Bad request (validation error, invalid input)
+          schema:
+            $ref: "#/definitions/Error"
+        "409":
+          description: Conflict (username or email already exists)
+          schema:
+            $ref: "#/definitions/Error"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/Error"
+  /login:
+    post:
+      tags:
+        - authentication
+      summary: Login user
+      description: Authenticate user with username and password. Returns a JWT token for subsequent API calls.
+      operationId: login
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          description: Login credentials
+          required: true
+          schema:
+            $ref: "#/definitions/LoginRequest"
+      responses:
+        "200":
+          description: Login successful, returns JWT token
+          schema:
+            $ref: "#/definitions/LoginResponse"
+        "401":
+          description: Unauthorized (invalid credentials)
+          schema:
+            $ref: "#/definitions/Error"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/Error"
+  /user/{id}:
+    delete:
+      tags:
+        - user
+      summary: Delete user
+      description: Delete a user by their UUID
+      operationId: deleteUser
+      produces:
+        - application/json
+      parameters:
+        - in: path
+          name: id
+          type: string
+          format: uuid
+          required: true
+          description: User UUID
+      responses:
+        "204":
+          description: User deleted successfully (No Content)
+        "404":
+          description: User not found
+          schema:
+            $ref: "#/definitions/Error"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/Error"
+definitions:
+  CreateUserRequest:
+    type: object
+    properties:
+      username:
+        type: string
+        description: Username (alphanumeric, 3-20 characters)
+        example: "johndoe"
+      password:
+        type: string
+        format: password
+        description: Password (minimum 6 characters)
+        example: "securepassword123"
+      email:
+        type: string
+        format: email
+        description: Email address (optional)
+        example: "john.doe@example.com"
+    required:
+      - username
+      - password
+  LoginRequest:
+    type: object
+    properties:
+      username:
+        type: string
+        description: Username
+        example: "johndoe"
+      password:
+        type: string
+        format: password
+        description: Password
+        example: "securepassword123"
+    required:
+      - username
+      - password
+  LoginResponse:
+    type: object
+    properties:
+      token:
+        type: string
+        description: JWT authentication token
+        example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+      userId:
+        type: string
+        format: uuid
+        description: User UUID
+        example: "550e8400-e29b-41d4-a716-446655440000"
+      username:
+        type: string
+        description: Username
+        example: "johndoe"
+      email:
+        type: string
+        format: email
+        description: User email
+        example: "john.doe@example.com"
+    required:
+      - token
+      - userId
+      - username
+  UserResponse:
+    type: object
+    properties:
+      id:
+        type: string
+        format: uuid
+        description: User UUID
+        example: "550e8400-e29b-41d4-a716-446655440000"
+      username:
+        type: string
+        description: Username
+        example: "johndoe"
+      email:
+        type: string
+        format: email
+        description: User email
+        example: "john.doe@example.com"
+      createdAt:
+        type: string
+        format: date-time
+        description: User creation timestamp
+        example: "2024-01-01T12:00:00Z"
+      updatedAt:
+        type: string
+        format: date-time
+        description: User last update timestamp
+        example: "2024-01-15T14:30:00Z"
+    required:
+      - id
+      - username
+      - createdAt
+      - updatedAt
+  Error:
+    type: object
+    properties:
+      message:
+        type: string
+        description: Error message
+        example: "Username already exists"
+      status:
+        type: integer
+        format: int32
+        description: HTTP status code
+        example: 409
+      timestamp:
+        type: string
+        format: date-time
+        description: Error timestamp
+        example: "2024-01-01T12:00:00Z"
+    required:
+      - message
+      - status
+      - timestamp
+
