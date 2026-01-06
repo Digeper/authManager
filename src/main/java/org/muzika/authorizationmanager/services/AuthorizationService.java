@@ -58,7 +58,7 @@ public class AuthorizationService {
         User savedUser = userRepository.save(user);
 
         // Send Kafka event for user creation
-        UserCreatedEvent event = new UserCreatedEvent(savedUser.getUsername());
+        UserCreatedEvent event = new UserCreatedEvent(savedUser.getId(), savedUser.getUsername());
         kafkaProducerService.sendUserCreatedEvent(USER_CREATED_TOPIC, savedUser.getUsername(), event);
 
         return savedUser;
