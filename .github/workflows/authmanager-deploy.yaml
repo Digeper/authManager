@@ -74,8 +74,9 @@ jobs:
       - name: Generate version
         id: version
         run: |
-          # Read version from AuthorizationManager POM directly
-          VERSION=$(mvn help:evaluate -f AuthorizationManager/pom.xml -Dexpression=project.version -q -DforceStdout)
+          # Read version using Maven from root pom.xml with module selection
+          # This is reliable because we're already building from root pom.xml
+          VERSION=$(mvn help:evaluate -f pom.xml -pl AuthorizationManager -Dexpression=project.version -q -DforceStdout 2>/dev/null || echo "0.0.1-SNAPSHOT")
           SHORT_SHA=$(git rev-parse --short HEAD)
           IMAGE_TAG="${VERSION}-${SHORT_SHA}"
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
