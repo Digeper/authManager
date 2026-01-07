@@ -1,0 +1,303 @@
+# GitHub Actions CI/CD Pipeline for AuthorizationManager
+# This workflow builds, tests, and deploys the AuthorizationManager service to Azure Kubernetes Service
+
+name: AuthorizationManager CI/CD
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'AuthorizationManager/**'
+      - 'muzikaLib/**'  # Rebuild if shared library changes
+      - '.github/workflows/authmanager-deploy.yaml'
+      - 'k8s/authmanager/**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'AuthorizationManager/**'
+      - 'muzikaLib/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      skip_tests:
+        description: 'Skip tests'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  JAVA_VERSION: '17'
+  # Docker Hub configuration - replace with your Docker Hub username
+  DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+  DOCKER_REGISTRY: ${{ secrets.DOCKER_REGISTRY || 'docker.io' }}
+  AKS_CLUSTER_NAME: ${{ secrets.AKS_CLUSTER_NAME }}
+  AKS_RESOURCE_GROUP: ${{ secrets.AKS_RESOURCE_GROUP }}
+  IMAGE_NAME: ${{ secrets.DOCKER_USERNAME || 'muzika' }}/authmanager
+
+jobs:
+  # Build and Test Job
+  build:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      image_tag: ${{ steps.version.outputs.image_tag }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Cache Maven packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
+
+      - name: Generate version
+        id: version
+        run: |
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout -pl AuthorizationManager)
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          IMAGE_TAG="${VERSION}-${SHORT_SHA}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "Generated version: ${VERSION}, Image tag: ${IMAGE_TAG}"
+
+      - name: Build muzikaLib (dependency)
+        run: |
+          mvn clean install -pl muzikaLib -am -DskipTests -B
+
+      - name: Build AuthorizationManager
+        run: |
+          mvn clean package -pl AuthorizationManager -am -DskipTests -B
+
+      - name: Run Tests
+        if: ${{ github.event.inputs.skip_tests != 'true' }}
+        run: |
+          mvn test -pl AuthorizationManager -B
+        continue-on-error: false
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: AuthorizationManager/target/surefire-reports/
+          retention-days: 7
+
+      - name: Upload JAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: authmanager-jar
+          path: AuthorizationManager/target/*.jar
+          retention-days: 1
+
+  # Docker Build and Push Job
+  docker:
+    name: Build & Push Docker Image
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build muzikaLib (dependency)
+        run: |
+          mvn clean install -pl muzikaLib -am -DskipTests -B
+
+      - name: Build and Push Docker image with Jib
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_REGISTRY: ${{ env.DOCKER_REGISTRY }}
+        run: |
+          # Build full image name (docker.io is default, so we can omit it)
+          if [ -z "$DOCKER_REGISTRY" ] || [ "$DOCKER_REGISTRY" = "docker.io" ]; then
+            IMAGE_NAME="$DOCKER_USERNAME/authmanager"
+          else
+            IMAGE_NAME="$DOCKER_REGISTRY/$DOCKER_USERNAME/authmanager"
+          fi
+          
+          mvn compile jib:build -pl AuthorizationManager \
+            -Djib.to.image=$IMAGE_NAME:${{ needs.build.outputs.image_tag }} \
+            -Djib.to.tags=${{ needs.build.outputs.image_tag }},latest,${{ github.sha }} \
+            -Djib.to.auth.username=${{ secrets.DOCKER_USERNAME }} \
+            -Djib.to.auth.password=${{ secrets.DOCKER_PASSWORD }} \
+            -Ddocker.image.registry=$DOCKER_REGISTRY \
+            -Ddocker.image.name=$IMAGE_NAME \
+            -B
+
+      - name: Output image details
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+        run: |
+          echo "### Docker Image Built" >> $GITHUB_STEP_SUMMARY
+          echo "- **Registry:** Docker Hub" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image:** $DOCKER_USERNAME/authmanager" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag:** ${{ needs.build.outputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
+
+  # Deploy to AKS Job
+  deploy:
+    name: Deploy to AKS
+    runs-on: ubuntu-latest
+    needs: [build, docker]
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    environment: 
+      name: ${{ github.event.inputs.environment || 'staging' }}
+      url: https://${{ github.event.inputs.environment || 'staging' }}.muzika.example.com
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Set AKS context
+        uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ env.AKS_RESOURCE_GROUP }}
+          cluster-name: ${{ env.AKS_CLUSTER_NAME }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'latest'
+
+      - name: Create namespace if not exists
+        run: |
+          kubectl create namespace muzika --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy Kafka (first time setup)
+        if: github.event.inputs.environment == 'staging' || github.event_name == 'push'
+        run: |
+          # Check if Kafka namespace exists
+          if ! kubectl get namespace kafka &> /dev/null; then
+            echo "Installing Strimzi Kafka Operator..."
+            kubectl create namespace kafka
+            kubectl apply -f 'https://strimzi.io/install/latest?namespace=kafka' -n kafka
+            
+            echo "Waiting for Strimzi operator to be ready..."
+            kubectl wait --for=condition=Ready pod -l name=strimzi-cluster-operator -n kafka --timeout=300s
+            
+            echo "Deploying Kafka cluster..."
+            kubectl apply -f k8s/kafka/kafka-cluster.yaml
+            
+            echo "Waiting for Kafka cluster to be ready..."
+            kubectl wait kafka/kafka-cluster --for=condition=Ready --timeout=600s -n kafka || true
+            
+            echo "Creating Kafka topics..."
+            kubectl apply -f k8s/kafka/kafka-topics.yaml
+          else
+            echo "Kafka namespace exists, skipping Kafka setup"
+          fi
+        continue-on-error: true
+
+      - name: Update image tag in deployment
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME || 'muzika' }}
+        run: |
+          cd k8s/authmanager
+          # Update the image tag in kustomization.yaml
+          sed -i "s/newTag: .*/newTag: ${{ needs.build.outputs.image_tag }}/" kustomization.yaml
+          # Replace DOCKER_USERNAME placeholder
+          sed -i "s/\${DOCKER_USERNAME:muzika}/$DOCKER_USERNAME/g" deployment.yaml
+          sed -i "s/\${DOCKER_USERNAME:muzika}/$DOCKER_USERNAME/g" kustomization.yaml
+
+      - name: Deploy AuthorizationManager
+        run: |
+          echo "Applying Kubernetes manifests..."
+          kubectl apply -k k8s/authmanager/
+          
+          echo "Waiting for deployment rollout..."
+          kubectl rollout status deployment/authmanager -n muzika --timeout=300s
+
+      - name: Verify deployment
+        run: |
+          echo "### Deployment Status" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n muzika -l app=authmanager >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          
+          echo "Checking pod health..."
+          kubectl get pods -n muzika -l app=authmanager -o wide
+          
+          echo "Recent pod events..."
+          kubectl describe pods -n muzika -l app=authmanager | tail -20
+
+      - name: Run smoke tests
+        run: |
+          echo "Running smoke tests..."
+          # Get the service ClusterIP
+          SERVICE_IP=$(kubectl get svc authmanager -n muzika -o jsonpath='{.spec.clusterIP}')
+          
+          # Create a test pod to run curl
+          kubectl run smoke-test --image=curlimages/curl --rm -i --restart=Never -n muzika -- \
+            curl -sf http://authmanager.muzika.svc.cluster.local:8091/actuator/health || \
+            echo "Smoke test completed (may fail if service not yet ready)"
+        continue-on-error: true
+
+      - name: Cleanup on failure
+        if: failure()
+        run: |
+          echo "Deployment failed. Checking logs..."
+          kubectl logs -n muzika -l app=authmanager --tail=100 || true
+          kubectl describe pods -n muzika -l app=authmanager || true
+
+  # Notify Job
+  notify:
+    name: Notify
+    runs-on: ubuntu-latest
+    needs: [build, docker, deploy]
+    if: always()
+    
+    steps:
+      - name: Create deployment summary
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Build | ${{ needs.build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Docker | ${{ needs.docker.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deploy | ${{ needs.deploy.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ needs.build.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Image Tag:** ${{ needs.build.outputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
