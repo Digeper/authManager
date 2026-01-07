@@ -92,14 +92,16 @@ jobs:
 
       - name: Build AuthorizationManager
         run: |
-          # Build from root, ensuring parent POM is in reactor
-          mvn clean package -f pom.xml -pl AuthorizationManager -am -DskipTests -B
+          # Build directly from AuthorizationManager directory
+          cd AuthorizationManager
+          mvn clean package -DskipTests -B
 
       - name: Run Tests
         if: ${{ github.event.inputs.skip_tests != 'true' }}
         run: |
-          # Build from root, ensuring parent POM is in reactor
-          mvn test -f pom.xml -pl AuthorizationManager -B
+          # Run tests from AuthorizationManager directory
+          cd AuthorizationManager
+          mvn test -B
         continue-on-error: false
 
       - name: Upload test results
@@ -146,8 +148,9 @@ jobs:
         env:
           ACR_NAME: ${{ env.ACR_NAME }}
         run: |
-          # Build from root, ensuring parent POM is in reactor
-          mvn compile jib:build -f pom.xml -pl AuthorizationManager \
+          # Build from AuthorizationManager directory
+          cd AuthorizationManager
+          mvn compile jib:build \
             -Djib.to.image=${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_tag }} \
             -Djib.to.tags=${{ needs.build.outputs.image_tag }},latest,${{ github.sha }} \
             -Djib.to.auth.username=${{ secrets.ACR_USERNAME }} \
