@@ -56,6 +56,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Verify directory structure
+        run: |
+          echo "Current directory: $(pwd)"
+          echo "Repository contents:"
+          ls -la
+          if [ -d "AuthorizationManager" ]; then
+            echo "AuthorizationManager directory exists"
+            ls -la AuthorizationManager/
+          else
+            echo "ERROR: AuthorizationManager directory not found!"
+            exit 1
+          fi
+
       - name: Set up JDK ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v4
         with:
@@ -73,12 +86,13 @@ jobs:
 
       - name: Generate version
         id: version
+        working-directory: AuthorizationManager
         run: |
           # Read version directly from pom.xml file (simple and reliable)
           # Extract the version from the project tag (second version tag in the file, after parent version)
-          if [ -f "AuthorizationManager/pom.xml" ]; then
+          if [ -f "pom.xml" ]; then
             # Get all version tags and take the second one (project version, not parent version)
-            VERSION=$(grep -o '<version>[^<]*</version>' AuthorizationManager/pom.xml | sed 's/<version>\(.*\)<\/version>/\1/' | sed -n '2p' | tr -d '[:space:]')
+            VERSION=$(grep -o '<version>[^<]*</version>' pom.xml | sed 's/<version>\(.*\)<\/version>/\1/' | sed -n '2p' | tr -d '[:space:]')
           fi
           # Fallback to default if not found
           if [ -z "$VERSION" ] || [ "$VERSION" = "" ]; then
@@ -91,16 +105,16 @@ jobs:
           echo "Generated version: ${VERSION}, Image tag: ${IMAGE_TAG}"
 
       - name: Build AuthorizationManager
+        working-directory: AuthorizationManager
         run: |
           # Build directly from AuthorizationManager directory
-          cd AuthorizationManager
           mvn clean package -DskipTests -B
 
       - name: Run Tests
         if: ${{ github.event.inputs.skip_tests != 'true' }}
+        working-directory: AuthorizationManager
         run: |
           # Run tests from AuthorizationManager directory
-          cd AuthorizationManager
           mvn test -B
         continue-on-error: false
 
@@ -145,11 +159,11 @@ jobs:
           password: ${{ secrets.ACR_PASSWORD }}
 
       - name: Build and Push Docker image with Jib
+        working-directory: AuthorizationManager
         env:
           ACR_NAME: ${{ env.ACR_NAME }}
         run: |
           # Build from AuthorizationManager directory
-          cd AuthorizationManager
           mvn compile jib:build \
             -Djib.to.image=${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_tag }} \
             -Djib.to.tags=${{ needs.build.outputs.image_tag }},latest,${{ github.sha }} \
