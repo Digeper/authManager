@@ -71,14 +71,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-maven-
 
-      - name: Build muzikaLib (dependency)
-        run: |
-          mvn clean install -pl muzikaLib -am -DskipTests -B
-
       - name: Generate version
         id: version
         run: |
-          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout -pl AuthorizationManager)
+          # Read version from AuthorizationManager POM directly
+          VERSION=$(mvn help:evaluate -f AuthorizationManager/pom.xml -Dexpression=project.version -q -DforceStdout)
           SHORT_SHA=$(git rev-parse --short HEAD)
           IMAGE_TAG="${VERSION}-${SHORT_SHA}"
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
@@ -87,12 +84,14 @@ jobs:
 
       - name: Build AuthorizationManager
         run: |
-          mvn clean package -pl AuthorizationManager -am -DskipTests -B
+          # Build from root, ensuring parent POM is in reactor
+          mvn clean package -f pom.xml -pl AuthorizationManager -am -DskipTests -B
 
       - name: Run Tests
         if: ${{ github.event.inputs.skip_tests != 'true' }}
         run: |
-          mvn test -pl AuthorizationManager -B
+          # Build from root, ensuring parent POM is in reactor
+          mvn test -f pom.xml -pl AuthorizationManager -B
         continue-on-error: false
 
       - name: Upload test results
@@ -135,15 +134,12 @@ jobs:
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
 
-      - name: Build muzikaLib (dependency)
-        run: |
-          mvn clean install -pl muzikaLib -am -DskipTests -B
-
       - name: Build and Push Docker image with Jib
         env:
           ACR_NAME: ${{ env.ACR_NAME }}
         run: |
-          mvn compile jib:build -pl AuthorizationManager \
+          # Build from root, ensuring parent POM is in reactor
+          mvn compile jib:build -f pom.xml -pl AuthorizationManager \
             -Djib.to.image=${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_tag }} \
             -Djib.to.tags=${{ needs.build.outputs.image_tag }},latest,${{ github.sha }} \
             -Djib.to.auth.username=${{ secrets.ACR_USERNAME }} \
