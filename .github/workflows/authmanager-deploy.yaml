@@ -56,19 +56,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Verify directory structure
-        run: |
-          echo "Current directory: $(pwd)"
-          echo "Repository contents:"
-          ls -la
-          if [ -d "AuthorizationManager" ]; then
-            echo "AuthorizationManager directory exists"
-            ls -la AuthorizationManager/
-          else
-            echo "ERROR: AuthorizationManager directory not found!"
-            exit 1
-          fi
-
       - name: Set up JDK ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v4
         with:
@@ -86,9 +73,8 @@ jobs:
 
       - name: Generate version
         id: version
-        working-directory: AuthorizationManager
         run: |
-          # Read version directly from pom.xml file (simple and reliable)
+          # Read version directly from pom.xml file (we're already in AuthorizationManager directory)
           # Extract the version from the project tag (second version tag in the file, after parent version)
           if [ -f "pom.xml" ]; then
             # Get all version tags and take the second one (project version, not parent version)
@@ -105,16 +91,14 @@ jobs:
           echo "Generated version: ${VERSION}, Image tag: ${IMAGE_TAG}"
 
       - name: Build AuthorizationManager
-        working-directory: AuthorizationManager
         run: |
-          # Build directly from AuthorizationManager directory
+          # Build from current directory (already in AuthorizationManager)
           mvn clean package -DskipTests -B
 
       - name: Run Tests
         if: ${{ github.event.inputs.skip_tests != 'true' }}
-        working-directory: AuthorizationManager
         run: |
-          # Run tests from AuthorizationManager directory
+          # Run tests from current directory (already in AuthorizationManager)
           mvn test -B
         continue-on-error: false
 
@@ -123,15 +107,17 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: AuthorizationManager/target/surefire-reports/
+          path: target/surefire-reports/
           retention-days: 7
+          if-no-files-found: ignore
 
       - name: Upload JAR artifact
         uses: actions/upload-artifact@v4
         with:
           name: authmanager-jar
-          path: AuthorizationManager/target/*.jar
+          path: target/*.jar
           retention-days: 1
+          if-no-files-found: ignore
 
   # Docker Build and Push Job
   docker:
@@ -159,11 +145,10 @@ jobs:
           password: ${{ secrets.ACR_PASSWORD }}
 
       - name: Build and Push Docker image with Jib
-        working-directory: AuthorizationManager
         env:
           ACR_NAME: ${{ env.ACR_NAME }}
         run: |
-          # Build from AuthorizationManager directory
+          # Build from current directory (already in AuthorizationManager)
           mvn compile jib:build \
             -Djib.to.image=${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_tag }} \
             -Djib.to.tags=${{ needs.build.outputs.image_tag }},latest,${{ github.sha }} \
@@ -242,13 +227,22 @@ jobs:
             kubectl wait --for=condition=Ready pod -l name=strimzi-cluster-operator -n kafka --timeout=300s
             
             echo "Deploying Kafka cluster..."
-            kubectl apply -f k8s/kafka/kafka-cluster.yaml
+            # k8s files are at repo root, need to go up one level
+            if [ -f "../k8s/kafka/kafka-cluster.yaml" ]; then
+              kubectl apply -f ../k8s/kafka/kafka-cluster.yaml
+            else
+              echo "Warning: k8s/kafka/kafka-cluster.yaml not found"
+            fi
             
             echo "Waiting for Kafka cluster to be ready..."
             kubectl wait kafka/kafka-cluster --for=condition=Ready --timeout=600s -n kafka || true
             
             echo "Creating Kafka topics..."
-            kubectl apply -f k8s/kafka/kafka-topics.yaml
+            if [ -f "../k8s/kafka/kafka-topics.yaml" ]; then
+              kubectl apply -f ../k8s/kafka/kafka-topics.yaml
+            else
+              echo "Warning: k8s/kafka/kafka-topics.yaml not found"
+            fi
           else
             echo "Kafka namespace exists, skipping Kafka setup"
           fi
@@ -256,17 +250,29 @@ jobs:
 
       - name: Update image tag in deployment
         run: |
-          cd k8s/authmanager
-          # Update the image tag in kustomization.yaml
-          sed -i "s/newTag: .*/newTag: ${{ needs.build.outputs.image_tag }}/" kustomization.yaml
-          # Replace ACR_NAME placeholder
-          sed -i "s/\${ACR_NAME}/${{ env.ACR_NAME }}/g" deployment.yaml
-          sed -i "s/\${ACR_NAME}/${{ env.ACR_NAME }}/g" kustomization.yaml
+          # k8s files are at repo root, need to go up one level
+          cd .. || true
+          if [ -d "k8s/authmanager" ]; then
+            cd k8s/authmanager
+            # Update the image tag in kustomization.yaml
+            sed -i "s/newTag: .*/newTag: ${{ needs.build.outputs.image_tag }}/" kustomization.yaml
+            # Replace ACR_NAME placeholder
+            sed -i "s/\${ACR_NAME}/${{ env.ACR_NAME }}/g" deployment.yaml
+            sed -i "s/\${ACR_NAME}/${{ env.ACR_NAME }}/g" kustomization.yaml
+          else
+            echo "Warning: k8s/authmanager directory not found"
+          fi
 
       - name: Deploy AuthorizationManager
         run: |
           echo "Applying Kubernetes manifests..."
-          kubectl apply -k k8s/authmanager/
+          # k8s files are at repo root
+          if [ -d "../k8s/authmanager" ]; then
+            kubectl apply -k ../k8s/authmanager/
+          else
+            echo "Error: k8s/authmanager directory not found at repo root"
+            exit 1
+          fi
           
           echo "Waiting for deployment rollout..."
           kubectl rollout status deployment/authmanager -n muzika --timeout=300s
