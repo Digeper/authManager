@@ -185,18 +185,24 @@ jobs:
           sed -i "s/\${ACR_NAME}/${{ secrets.ACR_NAME }}/g" deployment.yaml kustomization.yaml
           
           if [ -f "secretproviderclass.yaml" ]; then
-            [ -n "${{ secrets.KEYVAULT_NAME }}" ] && sed -i "s/\${KEYVAULT_NAME}/${{ secrets.KEYVAULT_NAME }}/g" secretproviderclass.yaml
-            [ -n "${{ secrets.AZURE_TENANT_ID }}" ] && sed -i "s/\${TENANT_ID}/${{ secrets.AZURE_TENANT_ID }}/g" secretproviderclass.yaml
+            [ -n "${{ secrets.KEYVAULT_NAME }}" ] || (echo "ERROR: KEYVAULT_NAME secret is required" && exit 1)
+            [ -n "${{ secrets.AZURE_TENANT_ID }}" ] || (echo "ERROR: AZURE_TENANT_ID secret is required" && exit 1)
+            
+            sed -i "s/\${KEYVAULT_NAME}/${{ secrets.KEYVAULT_NAME }}/g" secretproviderclass.yaml
+            sed -i "s/\${TENANT_ID}/${{ secrets.AZURE_TENANT_ID }}/g" secretproviderclass.yaml
             
             # Replace managed identity client ID - REQUIRED when multiple identities exist
             if [ -n "${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}" ]; then
+              echo "Using user-assigned identity: ${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}"
               sed -i "s/\${MANAGED_IDENTITY_CLIENT_ID}/${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}/g" secretproviderclass.yaml
             elif [ "${{ secrets.USE_SYSTEM_ASSIGNED_IDENTITY }}" = "true" ]; then
-              # Only use empty string for system-assigned identity (single identity scenario)
+              echo "Using system-assigned identity (single identity scenario)"
               sed -i 's/userAssignedIdentityID: "${MANAGED_IDENTITY_CLIENT_ID}"/userAssignedIdentityID: ""/g' secretproviderclass.yaml
             else
-              echo "WARNING: MANAGED_IDENTITY_CLIENT_ID not set. If multiple identities exist, this will fail."
-              sed -i 's/userAssignedIdentityID: "${MANAGED_IDENTITY_CLIENT_ID}"/userAssignedIdentityID: ""/g' secretproviderclass.yaml
+              echo "ERROR: MANAGED_IDENTITY_CLIENT_ID secret is required when multiple identities exist on the node."
+              echo "Please set MANAGED_IDENTITY_CLIENT_ID secret in GitHub repository settings."
+              echo "To find the client ID, run: az identity show --name <identity-name> --resource-group <rg> --query clientId -o tsv"
+              exit 1
             fi
           fi
 
