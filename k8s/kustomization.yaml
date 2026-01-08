@@ -11,6 +11,7 @@ resources:
   - secretproviderclass.yaml
   - deployment.yaml
   - service.yaml
+  - networkpolicy.yaml
 
 labels:
   - pairs:

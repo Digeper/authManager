@@ -1,0 +1,53 @@
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: authmanager-network-policy-restrictive
+  namespace: muzika
+spec:
+  podSelector:
+    matchLabels:
+      app: authmanager
+  policyTypes:
+     - Ingress
+     - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: muzika
+      ports:
+        - protocol: TCP
+          port: 8091
+  egress:
+    # DNS
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+  # PostgreSQL - Replace POSTGRES_IP with actual IP from: nslookup digeper.postgres.database.azure.com
+    - to:
+        - ipBlock:
+            cidr: 72.146.21.239/32
+    #ports:
+     #   - protocol: TCP
+      #    port: 5432
+#     # Kafka
+#     - to:
+#         - namespaceSelector:
+#             matchLabels:
+#               name: kafka
+      ports:
+        - protocol: TCP
+          port: 9092
+    # Azure services
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+
