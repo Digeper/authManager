@@ -1,0 +1,111 @@
+# Deployment for AuthorizationManager service - WITHOUT Key Vault dependency
+# Use this if Key Vault CSI driver is not working or pods can't start
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: authmanager
+  namespace: muzika
+  labels:
+    app: authmanager
+    app.kubernetes.io/name: authmanager
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: muzika-platform
+    app.kubernetes.io/version: "0.0.1"
+spec:
+  replicas: 1  # Reduced to 1 for testing
+  selector:
+    matchLabels:
+      app: authmanager
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: authmanager
+        app.kubernetes.io/name: authmanager
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: muzika-platform
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8091"
+        prometheus.io/path: "/actuator/prometheus"
+    spec:
+      serviceAccountName: authmanager-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: authmanager
+          image: ${ACR_NAME}.azurecr.io/muzika/authmanager:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8091
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: authmanager-config
+            - secretRef:
+                name: authmanager-secrets
+          env:
+            - name: JAVA_TOOL_OPTIONS
+              value: "-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
+          resources:
+            requests:
+              memory: "256Mi"  # Reduced for testing
+              cpu: "100m"      # Reduced for testing
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8091
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8091
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8091
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+      # Key Vault volume mount removed for troubleshooting
+      affinity:
+        # Anti-affinity removed for single node/testing
+      topologySpreadConstraints:
+        # Topology spread constraints removed for testing
+
+---
+# ServiceAccount for AuthorizationManager
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: authmanager-sa
+  namespace: muzika
+  labels:
+    app: authmanager
+    app.kubernetes.io/name: authmanager
+    app.kubernetes.io/part-of: muzika-platform
+
