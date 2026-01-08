@@ -312,16 +312,43 @@ jobs:
 
       - name: Verify deployment
         run: |
-          echo "### Deployment Status" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          kubectl get pods -n muzika -l app=authmanager >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "### Cluster Status Check" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
           
-          echo "Checking pod health..."
-          kubectl get pods -n muzika -l app=authmanager -o wide
+          echo "## Node Status" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          kubectl get nodes -o wide >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
           
-          echo "Recent pod events..."
-          kubectl describe pods -n muzika -l app=authmanager | tail -20
+          echo "## AuthorizationManager Pod Status" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n muzika -l app=authmanager -o wide >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## Key Vault CSI Driver Status" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n kube-system -l app=secrets-store-csi-driver >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "Checking node resources..."
+          kubectl top nodes 2>/dev/null || echo "Metrics server not available"
+          
+          echo "Checking why authmanager pods are pending..."
+          for pod in $(kubectl get pods -n muzika -l app=authmanager -o jsonpath='{.items[*].metadata.name}'); do
+            echo "=== Events for pod $pod ==="
+            kubectl describe pod -n muzika $pod | grep -A 10 "Events:" || echo "No events found"
+          done
+          
+          echo "Checking Key Vault CSI driver issues..."
+          kubectl describe pod -n kube-system -l app=secrets-store-csi-driver | grep -A 20 "Events:" || echo "No events found"
+          
+          echo "## Pod Events Summary" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          kubectl get events -n muzika --sort-by='.lastTimestamp' | tail -20 >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
 
       - name: Run smoke tests
         run: |

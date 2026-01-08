@@ -20,9 +20,13 @@ data:
   # JWT Configuration (expiration only - secret is in secrets)
   JWT_EXPIRATION: "86400000"
   
-  # JPA Configuration
+  # JPA/Hibernate Configuration
   SPRING_JPA_HIBERNATE_DDL_AUTO: "update"
   SPRING_JPA_SHOW_SQL: "false"
+  # Hibernate will automatically:
+  # - Create tables if they don't exist
+  # - Update schema when entities change
+  # - Keep existing data (update mode)
   
   # Logging Configuration
   LOGGING_LEVEL_ROOT: "INFO"
