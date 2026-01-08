@@ -304,6 +304,26 @@ jobs:
           if [ -d "k8s" ]; then
             echo "Found k8s directory"
             
+            # Apply all manifests using kustomize
+            # If Deployment selector is immutable, delete and retry
+            if ! kubectl apply -k k8s/ 2>&1 | tee /tmp/apply-output.log; then
+              # Check if error is due to immutable Deployment selector
+              if grep -q "field is immutable" /tmp/apply-output.log && grep -q "spec.selector" /tmp/apply-output.log; then
+                echo "Deployment selector is immutable. Deleting existing Deployment to allow recreation..."
+                kubectl delete deployment authmanager -n muzika --ignore-not-found=true
+                echo "Waiting for Deployment to be fully deleted..."
+                kubectl wait --for=delete deployment/authmanager -n muzika --timeout=60s 2>/dev/null || true
+                sleep 3
+                # Retry apply after deletion
+                echo "Retrying apply after Deployment deletion..."
+                kubectl apply -k k8s/
+              else
+                echo "Apply failed for a different reason. Error output:"
+                cat /tmp/apply-output.log
+                exit 1
+              fi
+            fi
+            
             # Apply all manifests using kustomize (excluding SecretProviderClass)
             kubectl apply -k k8s/
             
