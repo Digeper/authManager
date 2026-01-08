@@ -188,10 +188,15 @@ jobs:
             [ -n "${{ secrets.KEYVAULT_NAME }}" ] && sed -i "s/\${KEYVAULT_NAME}/${{ secrets.KEYVAULT_NAME }}/g" secretproviderclass.yaml
             [ -n "${{ secrets.AZURE_TENANT_ID }}" ] && sed -i "s/\${TENANT_ID}/${{ secrets.AZURE_TENANT_ID }}/g" secretproviderclass.yaml
             
-            if [ "${{ secrets.USE_SYSTEM_ASSIGNED_IDENTITY }}" = "true" ] || [ -z "${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}" ]; then
-              sed -i 's/userAssignedIdentityID: "${MANAGED_IDENTITY_CLIENT_ID}"/userAssignedIdentityID: ""/g' secretproviderclass.yaml
-            elif [ -n "${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}" ]; then
+            # Replace managed identity client ID - REQUIRED when multiple identities exist
+            if [ -n "${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}" ]; then
               sed -i "s/\${MANAGED_IDENTITY_CLIENT_ID}/${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}/g" secretproviderclass.yaml
+            elif [ "${{ secrets.USE_SYSTEM_ASSIGNED_IDENTITY }}" = "true" ]; then
+              # Only use empty string for system-assigned identity (single identity scenario)
+              sed -i 's/userAssignedIdentityID: "${MANAGED_IDENTITY_CLIENT_ID}"/userAssignedIdentityID: ""/g' secretproviderclass.yaml
+            else
+              echo "WARNING: MANAGED_IDENTITY_CLIENT_ID not set. If multiple identities exist, this will fail."
+              sed -i 's/userAssignedIdentityID: "${MANAGED_IDENTITY_CLIENT_ID}"/userAssignedIdentityID: ""/g' secretproviderclass.yaml
             fi
           fi
 
