@@ -28,22 +28,14 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
-  # PostgreSQL - Replace POSTGRES_IP with actual IP from: nslookup digeper.postgres.database.azure.com
+    # PostgreSQL - Specific IP for digeper.postgres.database.azure.com
     - to:
         - ipBlock:
             cidr: 72.146.21.239/32
-    #ports:
-     #   - protocol: TCP
-      #    port: 5432
-#     # Kafka
-#     - to:
-#         - namespaceSelector:
-#             matchLabels:
-#               name: kafka
       ports:
         - protocol: TCP
-          port: 9092
-    # Azure services
+          port: 5432
+    # Azure services (Key Vault, ACR, etc.)
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
