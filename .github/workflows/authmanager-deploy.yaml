@@ -242,25 +242,6 @@ jobs:
             echo "Install it with: az aks enable-addons --resource-group <RG> --name <AKS_NAME> --addons azure-keyvault-secrets-provider"
           fi
 
-      - name: Deploy Kafka (first time setup)
-        if: github.event.inputs.environment == 'staging' || github.event_name == 'push'
-        run: |
-          # Check if Kafka namespace exists
-          if ! kubectl get namespace kafka &> /dev/null; then
-            echo "Installing Strimzi Kafka Operator..."
-            kubectl create namespace kafka
-            kubectl apply -f 'https://strimzi.io/install/latest?namespace=kafka' -n kafka
-            
-            echo "Waiting for Strimzi operator to be ready..."
-            kubectl wait --for=condition=Ready pod -l name=strimzi-cluster-operator -n kafka --timeout=300s || echo "Strimzi operator not ready yet, continuing..."
-            
-            echo "Note: Kafka cluster deployment requires kafka-cluster.yaml from repo root"
-            echo "Deploy Kafka manually or ensure repo root is checked out"
-          else
-            echo "Kafka namespace exists, skipping Kafka setup"
-          fi
-        continue-on-error: true
-
       - name: Update image tag and Key Vault configuration
         run: |
           # k8s files are in the current directory (AuthorizationManager/k8s)
@@ -306,26 +287,26 @@ jobs:
             
             # Apply all manifests using kustomize
             # If Deployment selector is immutable, delete and retry
-            if ! kubectl apply -k k8s/ 2>&1 | tee /tmp/apply-output.log; then
-              # Check if error is due to immutable Deployment selector
-              if grep -q "field is immutable" /tmp/apply-output.log && grep -q "spec.selector" /tmp/apply-output.log; then
-                echo "Deployment selector is immutable. Deleting existing Deployment to allow recreation..."
-                kubectl delete deployment authmanager -n muzika --ignore-not-found=true
-                echo "Waiting for Deployment to be fully deleted..."
-                kubectl wait --for=delete deployment/authmanager -n muzika --timeout=60s 2>/dev/null || true
-                sleep 3
-                # Retry apply after deletion
-                echo "Retrying apply after Deployment deletion..."
-                kubectl apply -k k8s/
-              else
-                echo "Apply failed for a different reason. Error output:"
-                cat /tmp/apply-output.log
-                exit 1
-              fi
-            fi
+            # Capture both stdout and stderr
+            APPLY_OUTPUT=$(kubectl apply -k k8s/ 2>&1)
+            APPLY_EXIT_CODE=$?
+            echo "$APPLY_OUTPUT"
             
-            # Apply all manifests using kustomize (excluding SecretProviderClass)
-            kubectl apply -k k8s/
+            # Check if error message contains immutable selector error (even if exit code is 0)
+            # kubectl apply can partially succeed, so we check the output
+            if echo "$APPLY_OUTPUT" | grep -q "field is immutable" && echo "$APPLY_OUTPUT" | grep -q "spec.selector"; then
+              echo "Deployment selector is immutable. Deleting existing Deployment to allow recreation..."
+              kubectl delete deployment authmanager -n muzika --ignore-not-found=true
+              echo "Waiting for Deployment to be fully deleted..."
+              kubectl wait --for=delete deployment/authmanager -n muzika --timeout=60s 2>/dev/null || true
+              sleep 3
+              # Retry apply after deletion
+              echo "Retrying apply after Deployment deletion..."
+              kubectl apply -k k8s/
+            elif [ $APPLY_EXIT_CODE -ne 0 ]; then
+              echo "Apply failed for a different reason. Exiting."
+              exit $APPLY_EXIT_CODE
+            fi
             
             # Apply SecretProviderClass separately to handle updates properly
             if [ -f "k8s/secretproviderclass.yaml" ]; then
