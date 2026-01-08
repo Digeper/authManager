@@ -1,0 +1,9 @@
+# Namespace for Muzika application services
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: muzika
+  labels:
+    name: muzika
+    app.kubernetes.io/part-of: muzika-platform
+

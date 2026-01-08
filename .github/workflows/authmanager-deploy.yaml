@@ -192,6 +192,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Configure Kubernetes context from secret
         id: kubeconfig-setup
@@ -230,6 +232,16 @@ jobs:
         run: |
           kubectl create namespace muzika --dry-run=client -o yaml | kubectl apply -f -
 
+      - name: Verify Azure Key Vault CSI driver
+        run: |
+          echo "Checking if Azure Key Vault CSI driver is installed..."
+          if kubectl get pods -n kube-system -l app=secrets-store-csi-driver 2>/dev/null | grep -q Running; then
+            echo "Azure Key Vault CSI driver is installed"
+          else
+            echo "WARNING: Azure Key Vault CSI driver may not be installed"
+            echo "Install it with: az aks enable-addons --resource-group <RG> --name <AKS_NAME> --addons azure-keyvault-secrets-provider"
+          fi
+
       - name: Deploy Kafka (first time setup)
         if: github.event.inputs.environment == 'staging' || github.event_name == 'push'
         run: |
@@ -240,53 +252,58 @@ jobs:
             kubectl apply -f 'https://strimzi.io/install/latest?namespace=kafka' -n kafka
             
             echo "Waiting for Strimzi operator to be ready..."
-            kubectl wait --for=condition=Ready pod -l name=strimzi-cluster-operator -n kafka --timeout=300s
+            kubectl wait --for=condition=Ready pod -l name=strimzi-cluster-operator -n kafka --timeout=300s || echo "Strimzi operator not ready yet, continuing..."
             
-            echo "Deploying Kafka cluster..."
-            # k8s files are at repo root, need to go up one level
-            if [ -f "../k8s/kafka/kafka-cluster.yaml" ]; then
-              kubectl apply -f ../k8s/kafka/kafka-cluster.yaml
-            else
-              echo "Warning: k8s/kafka/kafka-cluster.yaml not found"
-            fi
-            
-            echo "Waiting for Kafka cluster to be ready..."
-            kubectl wait kafka/kafka-cluster --for=condition=Ready --timeout=600s -n kafka || true
-            
-            echo "Creating Kafka topics..."
-            if [ -f "../k8s/kafka/kafka-topics.yaml" ]; then
-              kubectl apply -f ../k8s/kafka/kafka-topics.yaml
-            else
-              echo "Warning: k8s/kafka/kafka-topics.yaml not found"
-            fi
+            echo "Note: Kafka cluster deployment requires kafka-cluster.yaml from repo root"
+            echo "Deploy Kafka manually or ensure repo root is checked out"
           else
             echo "Kafka namespace exists, skipping Kafka setup"
           fi
         continue-on-error: true
 
-      - name: Update image tag in deployment
+      - name: Update image tag and Key Vault configuration
         run: |
-          # k8s files are at repo root, need to go up one level
-          cd .. || true
-          if [ -d "k8s/authmanager" ]; then
-            cd k8s/authmanager
+          # k8s files are in the current directory (AuthorizationManager/k8s)
+          if [ -d "k8s" ]; then
+            cd k8s
             # Update the image tag in kustomization.yaml
             sed -i "s/newTag: .*/newTag: ${{ needs.build.outputs.image_tag }}/" kustomization.yaml
             # Replace ACR_NAME placeholder (using secret directly)
             sed -i "s/\${ACR_NAME}/${{ secrets.ACR_NAME }}/g" deployment.yaml
             sed -i "s/\${ACR_NAME}/${{ secrets.ACR_NAME }}/g" kustomization.yaml
+            # Replace Key Vault placeholders in secret.yaml
+            if [ -n "${{ secrets.KEYVAULT_NAME }}" ]; then
+              sed -i "s/\${KEYVAULT_NAME}/${{ secrets.KEYVAULT_NAME }}/g" secret.yaml
+            fi
+            if [ -n "${{ secrets.AZURE_TENANT_ID }}" ]; then
+              sed -i "s/\${TENANT_ID}/${{ secrets.AZURE_TENANT_ID }}/g" secret.yaml
+            fi
+            if [ -n "${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}" ]; then
+              sed -i "s/\${MANAGED_IDENTITY_CLIENT_ID}/${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}/g" secret.yaml
+              # Also update ServiceAccount annotation if using Workload Identity
+              sed -i "s/# azure.workload.identity\/client-id:.*/azure.workload.identity\/client-id: ${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}/g" deployment.yaml
+            fi
           else
-            echo "Warning: k8s/authmanager directory not found"
+            echo "Error: k8s directory not found in current directory"
+            echo "Current directory: $(pwd)"
+            echo "Available files:"
+            ls -la
+            exit 1
           fi
 
       - name: Deploy AuthorizationManager
         run: |
           echo "Applying Kubernetes manifests..."
-          # k8s files are at repo root
-          if [ -d "../k8s/authmanager" ]; then
-            kubectl apply -k ../k8s/authmanager/
+          echo "Current directory: $(pwd)"
+          
+          # k8s files are in the current directory (AuthorizationManager/k8s)
+          if [ -d "k8s" ]; then
+            echo "Found k8s directory"
+            kubectl apply -k k8s/
           else
-            echo "Error: k8s/authmanager directory not found at repo root"
+            echo "Error: k8s directory not found in current directory"
+            echo "Current directory structure:"
+            ls -la
             exit 1
           fi
           
