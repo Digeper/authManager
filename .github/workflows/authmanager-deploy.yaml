@@ -137,20 +137,36 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
+      - name: Validate ACR configuration
+        run: |
+          if [ -z "${{ secrets.ACR_NAME }}" ] || [ "${{ secrets.ACR_NAME }}" = "" ]; then
+            echo "ERROR: ACR_NAME secret is not set. Please configure it in GitHub repository settings."
+            exit 1
+          fi
+          if [ -z "${{ secrets.ACR_USERNAME }}" ] || [ "${{ secrets.ACR_USERNAME }}" = "" ]; then
+            echo "ERROR: ACR_USERNAME secret is not set. Please configure it in GitHub repository settings."
+            exit 1
+          fi
+          if [ -z "${{ secrets.ACR_PASSWORD }}" ] || [ "${{ secrets.ACR_PASSWORD }}" = "" ]; then
+            echo "ERROR: ACR_PASSWORD secret is not set. Please configure it in GitHub repository settings."
+            exit 1
+          fi
+          echo "ACR configuration validated successfully"
+
       - name: Login to Azure Container Registry
         uses: azure/docker-login@v1
         with:
-          login-server: ${{ env.ACR_NAME }}.azurecr.io
+          login-server: ${{ secrets.ACR_NAME }}.azurecr.io
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
 
       - name: Build and Push Docker image with Jib
         env:
-          ACR_NAME: ${{ env.ACR_NAME }}
+          ACR_NAME: ${{ secrets.ACR_NAME }}
         run: |
           # Build from current directory (already in AuthorizationManager)
           mvn compile jib:build \
-            -Djib.to.image=${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_tag }} \
+            -Djib.to.image=${{ secrets.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_tag }} \
             -Djib.to.tags=${{ needs.build.outputs.image_tag }},latest,${{ github.sha }} \
             -Djib.to.auth.username=${{ secrets.ACR_USERNAME }} \
             -Djib.to.auth.password=${{ secrets.ACR_PASSWORD }} \
@@ -159,7 +175,7 @@ jobs:
       - name: Output image details
         run: |
           echo "### Docker Image Built" >> $GITHUB_STEP_SUMMARY
-          echo "- **Registry:** ${{ env.ACR_NAME }}.azurecr.io" >> $GITHUB_STEP_SUMMARY
+          echo "- **Registry:** ${{ secrets.ACR_NAME }}.azurecr.io" >> $GITHUB_STEP_SUMMARY
           echo "- **Image:** ${{ env.IMAGE_NAME }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Tag:** ${{ needs.build.outputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
 
@@ -256,9 +272,9 @@ jobs:
             cd k8s/authmanager
             # Update the image tag in kustomization.yaml
             sed -i "s/newTag: .*/newTag: ${{ needs.build.outputs.image_tag }}/" kustomization.yaml
-            # Replace ACR_NAME placeholder
-            sed -i "s/\${ACR_NAME}/${{ env.ACR_NAME }}/g" deployment.yaml
-            sed -i "s/\${ACR_NAME}/${{ env.ACR_NAME }}/g" kustomization.yaml
+            # Replace ACR_NAME placeholder (using secret directly)
+            sed -i "s/\${ACR_NAME}/${{ secrets.ACR_NAME }}/g" deployment.yaml
+            sed -i "s/\${ACR_NAME}/${{ secrets.ACR_NAME }}/g" kustomization.yaml
           else
             echo "Warning: k8s/authmanager directory not found"
           fi
