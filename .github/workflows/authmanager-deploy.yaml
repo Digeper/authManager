@@ -260,7 +260,13 @@ jobs:
               if [ -n "${{ secrets.AZURE_TENANT_ID }}" ]; then
                 sed -i "s/\${TENANT_ID}/${{ secrets.AZURE_TENANT_ID }}/g" secretproviderclass.yaml
               fi
-              if [ -n "${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}" ]; then
+              # Handle managed identity: if MANAGED_IDENTITY_CLIENT_ID is empty or USE_SYSTEM_ASSIGNED_IDENTITY is true, use empty string
+              # Otherwise, use the provided client ID for user-assigned identity
+              if [ "${{ secrets.USE_SYSTEM_ASSIGNED_IDENTITY }}" = "true" ] || [ -z "${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}" ]; then
+                echo "Using system-assigned identity (setting userAssignedIdentityID to empty)"
+                sed -i "s/userAssignedIdentityID: \"\${MANAGED_IDENTITY_CLIENT_ID}\"/userAssignedIdentityID: \"\"/g" secretproviderclass.yaml
+              elif [ -n "${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}" ]; then
+                echo "Using user-assigned identity: ${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}"
                 sed -i "s/\${MANAGED_IDENTITY_CLIENT_ID}/${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}/g" secretproviderclass.yaml
               fi
             fi
