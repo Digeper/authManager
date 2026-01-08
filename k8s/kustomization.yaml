@@ -12,9 +12,10 @@ resources:
   - service.yaml
   - hpa.yaml
 
-commonLabels:
-  app.kubernetes.io/managed-by: kustomize
-  app.kubernetes.io/part-of: muzika-platform
+labels:
+  - pairs:
+      app.kubernetes.io/managed-by: kustomize
+      app.kubernetes.io/part-of: muzika-platform
 
 images:
   - name: ${ACR_NAME}.azurecr.io/muzika/authmanager

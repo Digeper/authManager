@@ -271,16 +271,20 @@ jobs:
             # Replace ACR_NAME placeholder (using secret directly)
             sed -i "s/\${ACR_NAME}/${{ secrets.ACR_NAME }}/g" deployment.yaml
             sed -i "s/\${ACR_NAME}/${{ secrets.ACR_NAME }}/g" kustomization.yaml
-            # Replace Key Vault placeholders in secret.yaml
-            if [ -n "${{ secrets.KEYVAULT_NAME }}" ]; then
-              sed -i "s/\${KEYVAULT_NAME}/${{ secrets.KEYVAULT_NAME }}/g" secret.yaml
+            # Replace Key Vault placeholders in secretproviderclass.yaml
+            if [ -f "secretproviderclass.yaml" ]; then
+              if [ -n "${{ secrets.KEYVAULT_NAME }}" ]; then
+                sed -i "s/\${KEYVAULT_NAME}/${{ secrets.KEYVAULT_NAME }}/g" secretproviderclass.yaml
+              fi
+              if [ -n "${{ secrets.AZURE_TENANT_ID }}" ]; then
+                sed -i "s/\${TENANT_ID}/${{ secrets.AZURE_TENANT_ID }}/g" secretproviderclass.yaml
+              fi
+              if [ -n "${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}" ]; then
+                sed -i "s/\${MANAGED_IDENTITY_CLIENT_ID}/${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}/g" secretproviderclass.yaml
+              fi
             fi
-            if [ -n "${{ secrets.AZURE_TENANT_ID }}" ]; then
-              sed -i "s/\${TENANT_ID}/${{ secrets.AZURE_TENANT_ID }}/g" secret.yaml
-            fi
+            # Also update ServiceAccount annotation if using Workload Identity
             if [ -n "${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}" ]; then
-              sed -i "s/\${MANAGED_IDENTITY_CLIENT_ID}/${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}/g" secret.yaml
-              # Also update ServiceAccount annotation if using Workload Identity
               sed -i "s/# azure.workload.identity\/client-id:.*/azure.workload.identity\/client-id: ${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}/g" deployment.yaml
             fi
           else
@@ -299,7 +303,19 @@ jobs:
           # k8s files are in the current directory (AuthorizationManager/k8s)
           if [ -d "k8s" ]; then
             echo "Found k8s directory"
+            
+            # Apply all manifests using kustomize (excluding SecretProviderClass)
             kubectl apply -k k8s/
+            
+            # Apply SecretProviderClass separately to handle updates properly
+            if [ -f "k8s/secretproviderclass.yaml" ]; then
+              echo "Applying SecretProviderClass..."
+              # Delete existing SecretProviderClass if it exists to avoid update conflicts
+              kubectl delete secretproviderclass authmanager-azure-keyvault -n muzika --ignore-not-found=true
+              sleep 2
+              # Apply the new SecretProviderClass
+              kubectl apply -f k8s/secretproviderclass.yaml
+            fi
           else
             echo "Error: k8s directory not found in current directory"
             echo "Current directory structure:"
