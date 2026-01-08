@@ -1,6 +1,4 @@
 # GitHub Actions CI/CD Pipeline for AuthorizationManager
-# This workflow builds, tests, and deploys the AuthorizationManager service to Azure Kubernetes Service
-
 name: AuthorizationManager CI/CD
 
 on:
@@ -9,9 +7,8 @@ on:
       - main
     paths:
       - 'AuthorizationManager/**'
-      - 'muzikaLib/**'  # Rebuild if shared library changes
+      - 'muzikaLib/**'
       - '.github/workflows/authmanager-deploy.yaml'
-      - 'k8s/authmanager/**'
   pull_request:
     branches:
       - main
@@ -42,7 +39,6 @@ env:
   IMAGE_NAME: muzika/authmanager
 
 jobs:
-  # Build and Test Job
   build:
     name: Build & Test
     runs-on: ubuntu-latest
@@ -63,63 +59,33 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      - name: Cache Maven packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.m2/repository
-          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
-          restore-keys: |
-            ${{ runner.os }}-maven-
-
       - name: Generate version
         id: version
         run: |
-          # Read version directly from pom.xml file (we're already in AuthorizationManager directory)
-          # Extract the version from the project tag (second version tag in the file, after parent version)
-          if [ -f "pom.xml" ]; then
-            # Get all version tags and take the second one (project version, not parent version)
-            VERSION=$(grep -o '<version>[^<]*</version>' pom.xml | sed 's/<version>\(.*\)<\/version>/\1/' | sed -n '2p' | tr -d '[:space:]')
-          fi
-          # Fallback to default if not found
-          if [ -z "$VERSION" ] || [ "$VERSION" = "" ]; then
-            VERSION="0.0.1-SNAPSHOT"
-          fi
+          VERSION=$(grep -o '<version>[^<]*</version>' pom.xml | sed 's/<version>\(.*\)<\/version>/\1/' | sed -n '2p' | tr -d '[:space:]' || echo "0.0.1-SNAPSHOT")
           SHORT_SHA=$(git rev-parse --short HEAD)
           IMAGE_TAG="${VERSION}-${SHORT_SHA}"
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
-          echo "Generated version: ${VERSION}, Image tag: ${IMAGE_TAG}"
 
       - name: Build AuthorizationManager
-        run: |
-          # Build from current directory (already in AuthorizationManager)
-          mvn clean package -DskipTests -B
+        working-directory: AuthorizationManager
+        run: mvn clean package -DskipTests -B
 
       - name: Run Tests
         if: ${{ github.event.inputs.skip_tests != 'true' }}
-        run: |
-          # Run tests from current directory (already in AuthorizationManager)
-          mvn test -B
-        continue-on-error: false
+        working-directory: AuthorizationManager
+        run: mvn test -B
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: target/surefire-reports/
+          path: AuthorizationManager/target/surefire-reports/
           retention-days: 7
           if-no-files-found: ignore
 
-      - name: Upload JAR artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: authmanager-jar
-          path: target/*.jar
-          retention-days: 1
-          if-no-files-found: ignore
-
-  # Docker Build and Push Job
   docker:
     name: Build & Push Docker Image
     runs-on: ubuntu-latest
@@ -139,19 +105,9 @@ jobs:
 
       - name: Validate ACR configuration
         run: |
-          if [ -z "${{ secrets.ACR_NAME }}" ] || [ "${{ secrets.ACR_NAME }}" = "" ]; then
-            echo "ERROR: ACR_NAME secret is not set. Please configure it in GitHub repository settings."
-            exit 1
-          fi
-          if [ -z "${{ secrets.ACR_USERNAME }}" ] || [ "${{ secrets.ACR_USERNAME }}" = "" ]; then
-            echo "ERROR: ACR_USERNAME secret is not set. Please configure it in GitHub repository settings."
-            exit 1
-          fi
-          if [ -z "${{ secrets.ACR_PASSWORD }}" ] || [ "${{ secrets.ACR_PASSWORD }}" = "" ]; then
-            echo "ERROR: ACR_PASSWORD secret is not set. Please configure it in GitHub repository settings."
-            exit 1
-          fi
-          echo "ACR configuration validated successfully"
+          [ -n "${{ secrets.ACR_NAME }}" ] || (echo "ERROR: ACR_NAME secret is not set" && exit 1)
+          [ -n "${{ secrets.ACR_USERNAME }}" ] || (echo "ERROR: ACR_USERNAME secret is not set" && exit 1)
+          [ -n "${{ secrets.ACR_PASSWORD }}" ] || (echo "ERROR: ACR_PASSWORD secret is not set" && exit 1)
 
       - name: Login to Azure Container Registry
         uses: azure/docker-login@v1
@@ -160,11 +116,11 @@ jobs:
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
 
-      - name: Build and Push Docker image with Jib
+      - name: Build and Push Docker image
+        working-directory: AuthorizationManager
         env:
           ACR_NAME: ${{ secrets.ACR_NAME }}
         run: |
-          # Build from current directory (already in AuthorizationManager)
           mvn compile jib:build \
             -Djib.to.image=${{ secrets.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_tag }} \
             -Djib.to.tags=${{ needs.build.outputs.image_tag }},latest,${{ github.sha }} \
@@ -179,7 +135,6 @@ jobs:
           echo "- **Image:** ${{ env.IMAGE_NAME }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Tag:** ${{ needs.build.outputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
 
-  # Deploy to AKS Job
   deploy:
     name: Deploy to AKS
     runs-on: ubuntu-latest
@@ -187,36 +142,31 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     environment: 
       name: ${{ github.event.inputs.environment || 'staging' }}
-      url: https://${{ github.event.inputs.environment || 'staging' }}.muzika.example.com
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Configure Kubernetes context from secret
+      - name: Configure Kubernetes context
         id: kubeconfig-setup
         continue-on-error: true
         run: |
           if [ -n "${{ secrets.KUBE_CONFIG_BASE64 }}" ]; then
-            echo "Using kubeconfig from secret"
             mkdir -p ${HOME}/.kube
             echo "${{ secrets.KUBE_CONFIG_BASE64 }}" | base64 --decode > ${HOME}/.kube/config
             chmod 600 ${HOME}/.kube/config
-            kubectl config get-contexts
             echo "kubeconfig_used=true" >> $GITHUB_OUTPUT
           else
             echo "kubeconfig_used=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Azure Login (fallback)
+      - name: Azure Login
         if: steps.kubeconfig-setup.outputs.kubeconfig_used != 'true'
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Set AKS context (fallback)
+      - name: Set AKS context
         if: steps.kubeconfig-setup.outputs.kubeconfig_used != 'true'
         uses: azure/aks-set-context@v4
         with:
@@ -228,171 +178,45 @@ jobs:
         with:
           version: 'latest'
 
-      - name: Create namespace if not exists
-        run: |
-          kubectl create namespace muzika --dry-run=client -o yaml | kubectl apply -f -
+      - name: Create namespace
+        run: kubectl create namespace muzika --dry-run=client -o yaml | kubectl apply -f -
 
-      - name: Verify Azure Key Vault CSI driver
+      - name: Update manifests
+        working-directory: AuthorizationManager/k8s
         run: |
-          echo "Checking if Azure Key Vault CSI driver is installed..."
-          if kubectl get pods -n kube-system -l app=secrets-store-csi-driver 2>/dev/null | grep -q Running; then
-            echo "Azure Key Vault CSI driver is installed"
-          else
-            echo "WARNING: Azure Key Vault CSI driver may not be installed"
-            echo "Install it with: az aks enable-addons --resource-group <RG> --name <AKS_NAME> --addons azure-keyvault-secrets-provider"
-          fi
-
-      - name: Update image tag and Key Vault configuration
-        run: |
-          # k8s files are in the current directory (AuthorizationManager/k8s)
-          if [ -d "k8s" ]; then
-            cd k8s
-            # Update the image tag in kustomization.yaml
-            sed -i "s/newTag: .*/newTag: ${{ needs.build.outputs.image_tag }}/" kustomization.yaml
-            # Replace ACR_NAME placeholder (using secret directly)
-            sed -i "s/\${ACR_NAME}/${{ secrets.ACR_NAME }}/g" deployment.yaml
-            sed -i "s/\${ACR_NAME}/${{ secrets.ACR_NAME }}/g" kustomization.yaml
-            # Replace Key Vault placeholders in secretproviderclass.yaml
-            if [ -f "secretproviderclass.yaml" ]; then
-              if [ -n "${{ secrets.KEYVAULT_NAME }}" ]; then
-                sed -i "s/\${KEYVAULT_NAME}/${{ secrets.KEYVAULT_NAME }}/g" secretproviderclass.yaml
-              fi
-              if [ -n "${{ secrets.AZURE_TENANT_ID }}" ]; then
-                sed -i "s/\${TENANT_ID}/${{ secrets.AZURE_TENANT_ID }}/g" secretproviderclass.yaml
-              fi
-              # Handle managed identity: if MANAGED_IDENTITY_CLIENT_ID is empty or USE_SYSTEM_ASSIGNED_IDENTITY is true, use empty string
-              # Otherwise, use the provided client ID for user-assigned identity
-              if [ "${{ secrets.USE_SYSTEM_ASSIGNED_IDENTITY }}" = "true" ] || [ -z "${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}" ]; then
-                echo "Using system-assigned identity (setting userAssignedIdentityID to empty)"
-                sed -i "s/userAssignedIdentityID: \"\${MANAGED_IDENTITY_CLIENT_ID}\"/userAssignedIdentityID: \"\"/g" secretproviderclass.yaml
-              elif [ -n "${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}" ]; then
-                echo "Using user-assigned identity: ${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}"
-                sed -i "s/\${MANAGED_IDENTITY_CLIENT_ID}/${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}/g" secretproviderclass.yaml
-              fi
+          sed -i "s/newTag: .*/newTag: ${{ needs.build.outputs.image_tag }}/" kustomization.yaml
+          sed -i "s/\${ACR_NAME}/${{ secrets.ACR_NAME }}/g" deployment.yaml kustomization.yaml
+          
+          if [ -f "secretproviderclass.yaml" ]; then
+            [ -n "${{ secrets.KEYVAULT_NAME }}" ] && sed -i "s/\${KEYVAULT_NAME}/${{ secrets.KEYVAULT_NAME }}/g" secretproviderclass.yaml
+            [ -n "${{ secrets.AZURE_TENANT_ID }}" ] && sed -i "s/\${TENANT_ID}/${{ secrets.AZURE_TENANT_ID }}/g" secretproviderclass.yaml
+            
+            if [ "${{ secrets.USE_SYSTEM_ASSIGNED_IDENTITY }}" = "true" ] || [ -z "${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}" ]; then
+              sed -i 's/userAssignedIdentityID: "${MANAGED_IDENTITY_CLIENT_ID}"/userAssignedIdentityID: ""/g' secretproviderclass.yaml
+            elif [ -n "${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}" ]; then
+              sed -i "s/\${MANAGED_IDENTITY_CLIENT_ID}/${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}/g" secretproviderclass.yaml
             fi
-            # Also update ServiceAccount annotation if using Workload Identity
-            if [ -n "${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}" ]; then
-              sed -i "s/# azure.workload.identity\/client-id:.*/azure.workload.identity\/client-id: ${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}/g" deployment.yaml
-            fi
-          else
-            echo "Error: k8s directory not found in current directory"
-            echo "Current directory: $(pwd)"
-            echo "Available files:"
-            ls -la
-            exit 1
           fi
 
       - name: Deploy AuthorizationManager
+        working-directory: AuthorizationManager/k8s
         run: |
-          echo "Applying Kubernetes manifests..."
-          echo "Current directory: $(pwd)"
-          
-          # k8s files are in the current directory (AuthorizationManager/k8s)
-          if [ -d "k8s" ]; then
-            echo "Found k8s directory"
-            
-            # Apply all manifests using kustomize
-            # If Deployment selector is immutable, delete and retry
-            # Capture both stdout and stderr
-            APPLY_OUTPUT=$(kubectl apply -k k8s/ 2>&1)
-            APPLY_EXIT_CODE=$?
-            echo "$APPLY_OUTPUT"
-            
-            # Check if error message contains immutable selector error (even if exit code is 0)
-            # kubectl apply can partially succeed, so we check the output
-            if echo "$APPLY_OUTPUT" | grep -q "field is immutable" && echo "$APPLY_OUTPUT" | grep -q "spec.selector"; then
-              echo "Deployment selector is immutable. Deleting existing Deployment to allow recreation..."
-              kubectl delete deployment authmanager -n muzika --ignore-not-found=true
-              echo "Waiting for Deployment to be fully deleted..."
-              kubectl wait --for=delete deployment/authmanager -n muzika --timeout=60s 2>/dev/null || true
-              sleep 3
-              # Retry apply after deletion
-              echo "Retrying apply after Deployment deletion..."
-              kubectl apply -k k8s/
-            elif [ $APPLY_EXIT_CODE -ne 0 ]; then
-              echo "Apply failed for a different reason. Exiting."
-              exit $APPLY_EXIT_CODE
-            fi
-            
-            # Apply SecretProviderClass separately to handle updates properly
-            if [ -f "k8s/secretproviderclass.yaml" ]; then
-              echo "Applying SecretProviderClass..."
-              # Delete existing SecretProviderClass if it exists to avoid update conflicts
-              kubectl delete secretproviderclass authmanager-azure-keyvault -n muzika --ignore-not-found=true
-              sleep 2
-              # Apply the new SecretProviderClass
-              kubectl apply -f k8s/secretproviderclass.yaml
-            fi
-          else
-            echo "Error: k8s directory not found in current directory"
-            echo "Current directory structure:"
-            ls -la
-            exit 1
-          fi
-          
-          echo "Waiting for deployment rollout..."
+          kubectl apply -k .
           kubectl rollout status deployment/authmanager -n muzika --timeout=300s
 
       - name: Verify deployment
         run: |
-          echo "### Cluster Status Check" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "## Node Status" >> $GITHUB_STEP_SUMMARY
+          echo "### Deployment Status" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          kubectl get nodes -o wide >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n muzika -l app=authmanager >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "## AuthorizationManager Pod Status" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          kubectl get pods -n muzika -l app=authmanager -o wide >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "## Key Vault CSI Driver Status" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          kubectl get pods -n kube-system -l app=secrets-store-csi-driver >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "Checking node resources..."
-          kubectl top nodes 2>/dev/null || echo "Metrics server not available"
-          
-          echo "Checking why authmanager pods are pending..."
-          for pod in $(kubectl get pods -n muzika -l app=authmanager -o jsonpath='{.items[*].metadata.name}'); do
-            echo "=== Events for pod $pod ==="
-            kubectl describe pod -n muzika $pod | grep -A 10 "Events:" || echo "No events found"
-          done
-          
-          echo "Checking Key Vault CSI driver issues..."
-          kubectl describe pod -n kube-system -l app=secrets-store-csi-driver | grep -A 20 "Events:" || echo "No events found"
-          
-          echo "## Pod Events Summary" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          kubectl get events -n muzika --sort-by='.lastTimestamp' | tail -20 >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-
-      - name: Run smoke tests
-        run: |
-          echo "Running smoke tests..."
-          # Get the service ClusterIP
-          SERVICE_IP=$(kubectl get svc authmanager -n muzika -o jsonpath='{.spec.clusterIP}')
-          
-          # Create a test pod to run curl
-          kubectl run smoke-test --image=curlimages/curl --rm -i --restart=Never -n muzika -- \
-            curl -sf http://authmanager.muzika.svc.cluster.local:8091/actuator/health || \
-            echo "Smoke test completed (may fail if service not yet ready)"
-        continue-on-error: true
 
       - name: Cleanup on failure
         if: failure()
         run: |
-          echo "Deployment failed. Checking logs..."
-          kubectl logs -n muzika -l app=authmanager --tail=100 || true
+          kubectl logs -n muzika -l app=authmanager --tail=50 || true
           kubectl describe pods -n muzika -l app=authmanager || true
 
-  # Notify Job
   notify:
     name: Notify
     runs-on: ubuntu-latest
@@ -413,4 +237,3 @@ jobs:
           echo "**Version:** ${{ needs.build.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "**Image Tag:** ${{ needs.build.outputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
           echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-

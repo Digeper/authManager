@@ -8,9 +8,9 @@ resources:
   - namespace.yaml
   - configmap.yaml
   - secret.yaml
+  - secretproviderclass.yaml
   - deployment.yaml
   - service.yaml
-  - hpa.yaml
 
 labels:
   - pairs:
@@ -20,4 +20,3 @@ labels:
 images:
   - name: ${ACR_NAME}.azurecr.io/muzika/authmanager
     newTag: latest
-

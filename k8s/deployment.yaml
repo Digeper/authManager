@@ -6,17 +6,36 @@ metadata:
   namespace: muzika
   labels:
     app: authmanager
+    app.kubernetes.io/name: authmanager
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: muzika-platform
 spec:
   replicas: 2
   selector:
     matchLabels:
       app: authmanager
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   template:
     metadata:
       labels:
         app: authmanager
+        app.kubernetes.io/name: authmanager
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: muzika-platform
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8091"
+        prometheus.io/path: "/actuator/prometheus"
     spec:
       serviceAccountName: authmanager-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       containers:
         - name: authmanager
           image: ${ACR_NAME}.azurecr.io/muzika/authmanager:latest
@@ -24,6 +43,7 @@ spec:
           ports:
             - name: http
               containerPort: 8091
+              protocol: TCP
           envFrom:
             - configMapRef:
                 name: authmanager-config
@@ -49,12 +69,30 @@ spec:
               port: 8091
             initialDelaySeconds: 60
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
               port: 8091
             initialDelaySeconds: 30
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8091
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
       volumes:
         - name: secrets-store
           csi:
@@ -72,3 +110,5 @@ metadata:
   namespace: muzika
   labels:
     app: authmanager
+    app.kubernetes.io/name: authmanager
+    app.kubernetes.io/part-of: muzika-platform
