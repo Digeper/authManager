@@ -180,214 +180,95 @@ jobs:
 
       - name: Update manifests
         run: |
-          # Determine k8s directory path - check if we're in AuthorizationManager or project root
-          if [ -d "k8s" ] && [ -f "pom.xml" ] && grep -q "AuthorizationManager" pom.xml 2>/dev/null; then
-            # We're in AuthorizationManager directory
-            K8S_DIR="k8s"
-          elif [ -d "AuthorizationManager/k8s" ]; then
-            # We're in project root
-            K8S_DIR="AuthorizationManager/k8s"
-          else
-            echo "ERROR: Could not find k8s directory!"
-            echo "Current directory: $(pwd)"
-            exit 1
-          fi
+          # Determine k8s directory path
+          [ -d "k8s" ] && [ -f "pom.xml" ] && grep -q "AuthorizationManager" pom.xml 2>/dev/null && K8S_DIR="k8s" || K8S_DIR="AuthorizationManager/k8s"
+          [ -d "$K8S_DIR" ] || { echo "ERROR: Could not find k8s directory!"; exit 1; }
           
           cd "$K8S_DIR"
           sed -i "s/newTag: .*/newTag: ${{ needs.build.outputs.image_tag }}/" kustomization.yaml
           sed -i "s/\${ACR_NAME}/${{ secrets.ACR_NAME }}/g" deployment.yaml kustomization.yaml
           
-          if [ -f "secretproviderclass.yaml" ]; then
-            [ -n "${{ secrets.KEYVAULT_NAME }}" ] || (echo "ERROR: KEYVAULT_NAME secret is required" && exit 1)
-            [ -n "${{ secrets.AZURE_TENANT_ID }}" ] || (echo "ERROR: AZURE_TENANT_ID secret is required" && exit 1)
-            
-            sed -i "s/\${KEYVAULT_NAME}/${{ secrets.KEYVAULT_NAME }}/g" secretproviderclass.yaml
-            sed -i "s/\${TENANT_ID}/${{ secrets.AZURE_TENANT_ID }}/g" secretproviderclass.yaml
-            
-            # Replace managed identity client ID - REQUIRED when multiple identities exist
-            if [ -n "${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}" ]; then
-              echo "Using user-assigned identity: ${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}"
-              sed -i "s/\${MANAGED_IDENTITY_CLIENT_ID}/${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}/g" secretproviderclass.yaml
-            elif [ "${{ secrets.USE_SYSTEM_ASSIGNED_IDENTITY }}" = "true" ]; then
-              echo "Using system-assigned identity (single identity scenario)"
-              sed -i 's/userAssignedIdentityID: "${MANAGED_IDENTITY_CLIENT_ID}"/userAssignedIdentityID: ""/g' secretproviderclass.yaml
-            else
-              echo "ERROR: MANAGED_IDENTITY_CLIENT_ID secret is required when multiple identities exist on the node."
-              echo "Please set MANAGED_IDENTITY_CLIENT_ID secret in GitHub repository settings."
-              echo "To find the client ID, run: az identity show --name <identity-name> --resource-group <rg> --query clientId -o tsv"
-              exit 1
-            fi
+          # Update SecretProviderClass if it exists
+          [ -f "secretproviderclass.yaml" ] || exit 0
+          [ -n "${{ secrets.KEYVAULT_NAME }}" ] || { echo "ERROR: KEYVAULT_NAME secret is required"; exit 1; }
+          [ -n "${{ secrets.AZURE_TENANT_ID }}" ] || { echo "ERROR: AZURE_TENANT_ID secret is required"; exit 1; }
+          
+          sed -i "s/\${KEYVAULT_NAME}/${{ secrets.KEYVAULT_NAME }}/g" secretproviderclass.yaml
+          sed -i "s/\${TENANT_ID}/${{ secrets.AZURE_TENANT_ID }}/g" secretproviderclass.yaml
+          
+          # Replace managed identity client ID
+          if [ -n "${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}" ]; then
+            sed -i "s/\${MANAGED_IDENTITY_CLIENT_ID}/${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}/g" secretproviderclass.yaml
+          elif [ "${{ secrets.USE_SYSTEM_ASSIGNED_IDENTITY }}" = "true" ]; then
+            sed -i 's/userAssignedIdentityID: "${MANAGED_IDENTITY_CLIENT_ID}"/userAssignedIdentityID: ""/g' secretproviderclass.yaml
+          else
+            echo "ERROR: MANAGED_IDENTITY_CLIENT_ID secret is required"
+            exit 1
           fi
 
       - name: Setup Key Vault secrets (SecretProviderClass)
         run: |
-          # Determine k8s directory path - check if we're in AuthorizationManager or project root
-          if [ -d "k8s" ] && [ -f "pom.xml" ] && grep -q "AuthorizationManager" pom.xml 2>/dev/null; then
-            # We're in AuthorizationManager directory
-            K8S_DIR="k8s"
-          elif [ -d "AuthorizationManager/k8s" ]; then
-            # We're in project root
-            K8S_DIR="AuthorizationManager/k8s"
-          else
-            echo "ERROR: Could not find k8s directory!"
-            echo "Current directory: $(pwd)"
-            exit 1
-          fi
+          # Determine k8s directory path
+          [ -d "k8s" ] && [ -f "pom.xml" ] && grep -q "AuthorizationManager" pom.xml 2>/dev/null && K8S_DIR="k8s" || K8S_DIR="AuthorizationManager/k8s"
+          [ -d "$K8S_DIR" ] || { echo "ERROR: Could not find k8s directory!"; exit 1; }
           
           cd "$K8S_DIR"
-          # Apply SecretProviderClass first to set up Key Vault integration
-          if [ -f "secretproviderclass.yaml" ]; then
-            echo "Applying SecretProviderClass..."
-            kubectl apply -f secretproviderclass.yaml
-            
-            # Always delete existing secret to ensure fresh sync from Key Vault
-            # This prevents stale placeholder values from persisting
-            if kubectl get secret authmanager-secrets -n muzika > /dev/null 2>&1; then
-              echo "Deleting existing secret to force fresh sync from Key Vault..."
-              kubectl delete secret authmanager-secrets -n muzika --ignore-not-found=true
-              sleep 3
-            fi
-            
-            # Run init job to trigger secret creation from Key Vault
-            # The init job mounts the SecretProviderClass volume, which triggers the CSI driver
-            # to fetch secrets from Key Vault and create the Kubernetes secret via secretObjects
-            if [ -f "init-secret-job.yaml" ]; then
-              echo "Creating secret from Key Vault via init job..."
-              # Delete any existing init job first
-              kubectl delete job authmanager-init-secret -n muzika --ignore-not-found=true
-              sleep 2
-              
-              # Apply the init job
-              kubectl apply -f init-secret-job.yaml
-              
-              # Wait for the job to complete (this triggers the secret sync)
-              echo "Waiting for init job to complete and trigger secret sync..."
-              MAX_WAIT=120
-              ELAPSED=0
-              while [ $ELAPSED -lt $MAX_WAIT ]; do
-                if kubectl wait --for=condition=complete --timeout=10s job/authmanager-init-secret -n muzika 2>/dev/null; then
-                  echo "Init job completed successfully"
-                  break
-                fi
-                ELAPSED=$((ELAPSED + 10))
-                echo "Waiting for init job... ($ELAPSED/$MAX_WAIT seconds)"
-                sleep 10
-              done
-              
-              # Wait a bit more for the secret to be created by the CSI driver
-              echo "Waiting for secret to be synced from Key Vault..."
-              sleep 5
-              
-              # Verify secret exists and doesn't have placeholder values
-              MAX_RETRIES=6
-              RETRY=0
-              SECRET_VALID=false
-              while [ $RETRY -lt $MAX_RETRIES ]; do
-                if kubectl get secret authmanager-secrets -n muzika > /dev/null 2>&1; then
-                  POSTGRES_URL=$(kubectl get secret authmanager-secrets -n muzika -o jsonpath='{.data.POSTGRES_URL}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
-                  if [ -n "$POSTGRES_URL" ] && ! echo "$POSTGRES_URL" | grep -q "REPLACE_WITH"; then
-                    echo "✓ Secret created from Key Vault successfully!"
-                    echo "✓ POSTGRES_URL does not contain placeholder values"
-                    SECRET_VALID=true
-                    break
-                  else
-                    echo "Secret exists but still has placeholder values. Retrying... ($RETRY/$MAX_RETRIES)"
-                  fi
-                else
-                  echo "Secret not created yet. Waiting... ($RETRY/$MAX_RETRIES)"
-                fi
-                RETRY=$((RETRY + 1))
-                sleep 5
-              done
-              
-              if [ "$SECRET_VALID" != "true" ]; then
-                echo "ERROR: Secret was not created properly from Key Vault!"
-                echo "Please check:"
-                echo "  1. Key Vault secrets exist (postgres-connection-string, postgres-username, postgres-password, jwt-secret)"
-                echo "  2. Managed identity has 'Key Vault Secrets User' role on the Key Vault"
-                echo "  3. SecretProviderClass configuration is correct"
-                kubectl logs -n muzika job/authmanager-init-secret --tail=50 || true
-                exit 1
-              fi
-              
-              # Cleanup init job
-              kubectl delete job authmanager-init-secret -n muzika --ignore-not-found=true
-            else
-              echo "WARNING: init-secret-job.yaml not found. Secret sync will happen when pod starts."
-            fi
-          else
-            echo "No SecretProviderClass found, skipping Key Vault setup"
-          fi
-
-      - name: Verify Key Vault secret before deployment
-        run: |
-          # Determine k8s directory path
-          if [ -d "k8s" ] && [ -f "pom.xml" ] && grep -q "AuthorizationManager" pom.xml 2>/dev/null; then
-            K8S_DIR="k8s"
-          elif [ -d "AuthorizationManager/k8s" ]; then
-            K8S_DIR="AuthorizationManager/k8s"
-          else
-            K8S_DIR=""
-          fi
+          [ -f "secretproviderclass.yaml" ] || { echo "No SecretProviderClass found, skipping Key Vault setup"; exit 0; }
           
-          # Only verify if SecretProviderClass exists
-          if [ -n "$K8S_DIR" ] && [ -f "$K8S_DIR/secretproviderclass.yaml" ]; then
-            # Final verification that secret exists and has correct values
+          echo "Applying SecretProviderClass..."
+          kubectl apply -f secretproviderclass.yaml
+          
+          # Delete existing secret to force fresh sync
+          kubectl delete secret authmanager-secrets -n muzika --ignore-not-found=true
+          sleep 3
+          
+          # Run init job to trigger secret creation
+          [ -f "init-secret-job.yaml" ] || { echo "WARNING: init-secret-job.yaml not found"; exit 0; }
+          
+          kubectl delete job authmanager-init-secret -n muzika --ignore-not-found=true
+          sleep 2
+          kubectl apply -f init-secret-job.yaml
+          
+          # Wait for job completion
+          echo "Waiting for secret sync from Key Vault..."
+          kubectl wait --for=condition=complete --timeout=120s job/authmanager-init-secret -n muzika || true
+          sleep 5
+          
+          # Verify secret has real values
+          for i in {1..6}; do
             if kubectl get secret authmanager-secrets -n muzika > /dev/null 2>&1; then
               POSTGRES_URL=$(kubectl get secret authmanager-secrets -n muzika -o jsonpath='{.data.POSTGRES_URL}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
-              if echo "$POSTGRES_URL" | grep -q "REPLACE_WITH"; then
-                echo "ERROR: Secret still contains placeholder values right before deployment!"
-                echo "This means Key Vault secrets are NOT being used."
-                echo "POSTGRES_URL value: ${POSTGRES_URL:0:80}..."
-                exit 1
-              else
+              if [ -n "$POSTGRES_URL" ] && ! echo "$POSTGRES_URL" | grep -q "REPLACE_WITH"; then
                 echo "✓ Secret verified: Contains real values from Key Vault"
-                echo "✓ Ready to deploy with Key Vault secrets"
+                kubectl delete job authmanager-init-secret -n muzika --ignore-not-found=true
+                exit 0
               fi
-            else
-              echo "ERROR: Secret does not exist right before deployment!"
-              echo "Key Vault secret sync failed."
-              exit 1
             fi
-          else
-            echo "No SecretProviderClass found, skipping secret verification"
-          fi
+            [ $i -lt 6 ] && sleep 5
+          done
+          
+          echo "ERROR: Secret was not created properly from Key Vault!"
+          kubectl logs -n muzika job/authmanager-init-secret --tail=50 || true
+          exit 1
 
       - name: Deploy AuthorizationManager
         run: |
-          # Determine k8s directory path - check if we're in AuthorizationManager or project root
-          if [ -d "k8s" ] && [ -f "pom.xml" ] && grep -q "AuthorizationManager" pom.xml 2>/dev/null; then
-            # We're in AuthorizationManager directory
-            K8S_DIR="k8s"
-          elif [ -d "AuthorizationManager/k8s" ]; then
-            # We're in project root
-            K8S_DIR="AuthorizationManager/k8s"
-          else
-            echo "ERROR: Could not find k8s directory!"
-            echo "Current directory: $(pwd)"
-            exit 1
-          fi
+          # Determine k8s directory path
+          [ -d "k8s" ] && [ -f "pom.xml" ] && grep -q "AuthorizationManager" pom.xml 2>/dev/null && K8S_DIR="k8s" || K8S_DIR="AuthorizationManager/k8s"
+          [ -d "$K8S_DIR" ] || { echo "ERROR: Could not find k8s directory!"; exit 1; }
           
           cd "$K8S_DIR"
           
-          # If using Key Vault (SecretProviderClass exists), exclude secrets.yaml from kustomization
-          # to prevent placeholder values from overwriting Key Vault secrets
-          if [ -f "secretproviderclass.yaml" ]; then
-            echo "Key Vault detected - excluding secrets.yaml from kustomization to preserve Key Vault secrets"
-            # Create a backup of kustomization.yaml
+          # Exclude secrets.yaml if using Key Vault
+          [ -f "secretproviderclass.yaml" ] && {
             cp kustomization.yaml kustomization.yaml.bak
-            # Remove secrets.yaml from resources list
             sed -i '/^  - secrets\.yaml$/d' kustomization.yaml
-            echo "Updated kustomization.yaml (removed secrets.yaml)"
-          fi
+          }
           
           kubectl apply -k .
           kubectl rollout status deployment/authmanager -n muzika --timeout=300s
           
-          # Restore original kustomization.yaml if we modified it
-          if [ -f "kustomization.yaml.bak" ]; then
-            mv kustomization.yaml.bak kustomization.yaml
-          fi
+          [ -f "kustomization.yaml.bak" ] && mv kustomization.yaml.bak kustomization.yaml
 
       - name: Verify deployment
         run: |
