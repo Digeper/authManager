@@ -11,6 +11,7 @@ resources:
   - deployment.yaml
   - service.yaml
   - networkpolicy.yaml
+  - secrets.yaml
 
 labels:
   - pairs:
