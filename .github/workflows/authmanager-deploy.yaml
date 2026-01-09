@@ -240,6 +240,16 @@ jobs:
             echo "Applying SecretProviderClass..."
             kubectl apply -f secretproviderclass.yaml
             
+            # Check if existing secret has placeholder values and delete it if so
+            if kubectl get secret authmanager-secrets -n muzika > /dev/null 2>&1; then
+              POSTGRES_URL=$(kubectl get secret authmanager-secrets -n muzika -o jsonpath='{.data.POSTGRES_URL}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+              if echo "$POSTGRES_URL" | grep -q "REPLACE_WITH"; then
+                echo "Warning: Existing secret contains placeholder values. Deleting to allow Key Vault to recreate it..."
+                kubectl delete secret authmanager-secrets -n muzika --ignore-not-found=true
+                sleep 2
+              fi
+            fi
+            
             # Run init job to trigger secret creation from Key Vault
             if [ -f "init-secret-job.yaml" ]; then
               echo "Creating secret from Key Vault via init job..."
@@ -250,9 +260,16 @@ jobs:
                 sleep 10
               }
               
-              # Verify secret exists
+              # Verify secret exists and doesn't have placeholder values
               if kubectl get secret authmanager-secrets -n muzika > /dev/null 2>&1; then
-                echo "Secret created from Key Vault successfully!"
+                POSTGRES_URL=$(kubectl get secret authmanager-secrets -n muzika -o jsonpath='{.data.POSTGRES_URL}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+                if echo "$POSTGRES_URL" | grep -q "REPLACE_WITH"; then
+                  echo "ERROR: Secret still contains placeholder values after Key Vault setup!"
+                  echo "Please verify that Key Vault secrets are properly configured."
+                  exit 1
+                else
+                  echo "Secret created from Key Vault successfully!"
+                fi
               else
                 echo "Warning: Secret not created yet. Pod will wait for it."
               fi
@@ -280,8 +297,25 @@ jobs:
           fi
           
           cd "$K8S_DIR"
+          
+          # If using Key Vault (SecretProviderClass exists), exclude secrets.yaml from kustomization
+          # to prevent placeholder values from overwriting Key Vault secrets
+          if [ -f "secretproviderclass.yaml" ]; then
+            echo "Key Vault detected - excluding secrets.yaml from kustomization to preserve Key Vault secrets"
+            # Create a backup of kustomization.yaml
+            cp kustomization.yaml kustomization.yaml.bak
+            # Remove secrets.yaml from resources list
+            sed -i '/^  - secrets\.yaml$/d' kustomization.yaml
+            echo "Updated kustomization.yaml (removed secrets.yaml)"
+          fi
+          
           kubectl apply -k .
           kubectl rollout status deployment/authmanager -n muzika --timeout=300s
+          
+          # Restore original kustomization.yaml if we modified it
+          if [ -f "kustomization.yaml.bak" ]; then
+            mv kustomization.yaml.bak kustomization.yaml
+          fi
 
       - name: Verify deployment
         run: |
