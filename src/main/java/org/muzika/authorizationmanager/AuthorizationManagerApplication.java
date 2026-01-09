@@ -37,6 +37,17 @@ public class AuthorizationManagerApplication {
     public static void main(String[] args) {
         // #region agent log
         logDebug("H1,H2,H3,H4", "Application main method started", "{\"argsCount\":" + args.length + "}");
+        String postgresUrl = System.getenv("POSTGRES_URL");
+        String postgresUsername = System.getenv("POSTGRES_USERNAME");
+        String postgresPassword = System.getenv("POSTGRES_PASSWORD");
+        boolean hasPostgresUrl = postgresUrl != null && !postgresUrl.isEmpty();
+        boolean hasPostgresUsername = postgresUsername != null && !postgresUsername.isEmpty();
+        boolean hasPostgresPassword = postgresPassword != null && !postgresPassword.isEmpty();
+        String urlPreview = hasPostgresUrl ? (postgresUrl.length() > 50 ? postgresUrl.substring(0, 50) + "..." : postgresUrl) : "null";
+        logDebug("H1", "Environment variables check in main", String.format(
+            "{\"hasPostgresUrl\":%s,\"hasPostgresUsername\":%s,\"hasPostgresPassword\":%s,\"urlPreview\":\"%s\"}",
+            hasPostgresUrl, hasPostgresUsername, hasPostgresPassword, urlPreview.replace("\"", "\\\"")
+        ));
         // #endregion agent log
         
         try {
