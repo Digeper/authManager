@@ -32,45 +32,12 @@ public class KafkaConfig {
 
     @Bean
     public KafkaAdmin admin() {
-        // #region agent log
-        try {
-            String logPath = "/Users/macabc/IdeaProjects/muzika/.cursor/debug.log";
-            String logEntry = String.format(
-                "{\"sessionId\":\"debug-session\",\"runId\":\"startup\",\"hypothesisId\":\"H3\",\"location\":\"KafkaConfig.admin\",\"message\":\"KafkaAdmin bean creation started\",\"data\":{\"bootstrapServers\":\"%s\"},\"timestamp\":%d}%n",
-                bootstrapServers, System.currentTimeMillis()
-            );
-            try (java.io.FileWriter fw = new java.io.FileWriter(logPath, true);
-                 java.io.PrintWriter pw = new java.io.PrintWriter(fw)) {
-                pw.print(logEntry);
-            }
-        } catch (Exception e) {
-            // Silently fail
-        }
-        // #endregion agent log
-        
         Map<String, Object> configs = new HashMap<>();
         configs.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         // Cloud-optimized timeouts
         configs.put(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, 30000);
         configs.put(AdminClientConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, 60000);
         configs.put(AdminClientConfig.RETRIES_CONFIG, retries);
-        
-        // #region agent log
-        try {
-            String logPath = "/Users/macabc/IdeaProjects/muzika/.cursor/debug.log";
-            String logEntry = String.format(
-                "{\"sessionId\":\"debug-session\",\"runId\":\"startup\",\"hypothesisId\":\"H3\",\"location\":\"KafkaConfig.admin\",\"message\":\"KafkaAdmin bean created\",\"data\":{},\"timestamp\":%d}%n",
-                System.currentTimeMillis()
-            );
-            try (java.io.FileWriter fw = new java.io.FileWriter(logPath, true);
-                 java.io.PrintWriter pw = new java.io.PrintWriter(fw)) {
-                pw.print(logEntry);
-            }
-        } catch (Exception e) {
-            // Silently fail
-        }
-        // #endregion agent log
-        
         return new KafkaAdmin(configs);
     }
 
