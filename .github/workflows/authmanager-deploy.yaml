@@ -180,7 +180,20 @@ jobs:
 
       - name: Update manifests
         run: |
-          cd k8s
+          # Determine k8s directory path - check if we're in AuthorizationManager or project root
+          if [ -d "k8s" ] && [ -f "pom.xml" ] && grep -q "AuthorizationManager" pom.xml 2>/dev/null; then
+            # We're in AuthorizationManager directory
+            K8S_DIR="k8s"
+          elif [ -d "AuthorizationManager/k8s" ]; then
+            # We're in project root
+            K8S_DIR="AuthorizationManager/k8s"
+          else
+            echo "ERROR: Could not find k8s directory!"
+            echo "Current directory: $(pwd)"
+            exit 1
+          fi
+          
+          cd "$K8S_DIR"
           sed -i "s/newTag: .*/newTag: ${{ needs.build.outputs.image_tag }}/" kustomization.yaml
           sed -i "s/\${ACR_NAME}/${{ secrets.ACR_NAME }}/g" deployment.yaml kustomization.yaml
           
@@ -206,9 +219,67 @@ jobs:
             fi
           fi
 
+      - name: Setup Key Vault secrets (SecretProviderClass)
+        run: |
+          # Determine k8s directory path - check if we're in AuthorizationManager or project root
+          if [ -d "k8s" ] && [ -f "pom.xml" ] && grep -q "AuthorizationManager" pom.xml 2>/dev/null; then
+            # We're in AuthorizationManager directory
+            K8S_DIR="k8s"
+          elif [ -d "AuthorizationManager/k8s" ]; then
+            # We're in project root
+            K8S_DIR="AuthorizationManager/k8s"
+          else
+            echo "ERROR: Could not find k8s directory!"
+            echo "Current directory: $(pwd)"
+            exit 1
+          fi
+          
+          cd "$K8S_DIR"
+          # Apply SecretProviderClass first to set up Key Vault integration
+          if [ -f "secretproviderclass.yaml" ]; then
+            echo "Applying SecretProviderClass..."
+            kubectl apply -f secretproviderclass.yaml
+            
+            # Run init job to trigger secret creation from Key Vault
+            if [ -f "init-secret-job.yaml" ]; then
+              echo "Creating secret from Key Vault via init job..."
+              kubectl apply -f init-secret-job.yaml
+              echo "Waiting for secret to be created..."
+              kubectl wait --for=condition=complete --timeout=60s job/authmanager-init-secret -n muzika 2>/dev/null || {
+                echo "Init job may take longer. Checking secret..."
+                sleep 10
+              }
+              
+              # Verify secret exists
+              if kubectl get secret authmanager-secrets -n muzika > /dev/null 2>&1; then
+                echo "Secret created from Key Vault successfully!"
+              else
+                echo "Warning: Secret not created yet. Pod will wait for it."
+              fi
+              
+              # Cleanup init job
+              kubectl delete job authmanager-init-secret -n muzika --ignore-not-found=true
+            fi
+          else
+            echo "No SecretProviderClass found, skipping Key Vault setup"
+          fi
+
       - name: Deploy AuthorizationManager
         run: |
-          cd k8s
+          # Determine k8s directory path - check if we're in AuthorizationManager or project root
+          if [ -d "k8s" ] && [ -f "pom.xml" ] && grep -q "AuthorizationManager" pom.xml 2>/dev/null; then
+            # We're in AuthorizationManager directory
+            K8S_DIR="k8s"
+          elif [ -d "AuthorizationManager/k8s" ]; then
+            # We're in project root
+            K8S_DIR="AuthorizationManager/k8s"
+          else
+            echo "ERROR: Could not find k8s directory!"
+            echo "Current directory: $(pwd)"
+            exit 1
+          fi
+          
+          cd "$K8S_DIR"
           kubectl apply -k .
           kubectl rollout status deployment/authmanager -n muzika --timeout=300s
 
