@@ -175,8 +175,43 @@ jobs:
         with:
           version: 'latest'
 
-      - name: Create namespace
-        run: kubectl create namespace muzika --dry-run=client -o yaml | kubectl apply -f -
+      - name: Create namespaces
+        run: |
+          kubectl create namespace muzika --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create namespace kafka --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Verify Kafka is available
+        continue-on-error: true
+        run: |
+          echo "Checking Kafka cluster status..."
+          if kubectl get kafka kafka-cluster -n kafka > /dev/null 2>&1; then
+            echo "Kafka cluster found, checking readiness..."
+            KAFKA_READY=$(kubectl get kafka kafka-cluster -n kafka -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "Unknown")
+            if [ "$KAFKA_READY" = "True" ]; then
+              echo "✓ Kafka cluster is ready"
+            else
+              echo "⚠ Kafka cluster exists but may not be ready yet"
+              kubectl get kafka kafka-cluster -n kafka -o yaml | grep -A 5 "conditions:" || true
+            fi
+          else
+            echo "⚠ Kafka cluster not found. Make sure Kafka is deployed before deploying AuthorizationManager."
+            echo "To deploy Kafka, run: kubectl apply -f kafka/namespace.yaml kafka/kafka-nodepool.yaml kafka/kafka-cluster.yaml"
+          fi
+          
+          # Check if Kafka bootstrap service exists
+          if kubectl get svc kafka-cluster-kafka-bootstrap -n kafka > /dev/null 2>&1; then
+            echo "✓ Kafka bootstrap service is available"
+            kubectl get svc kafka-cluster-kafka-bootstrap -n kafka
+            echo "Kafka bootstrap server: kafka-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092"
+          else
+            echo "⚠ Kafka bootstrap service not found. AuthorizationManager may not be able to connect to Kafka."
+            echo "Expected service: kafka-cluster-kafka-bootstrap in namespace kafka"
+          fi
+          
+          # Check Kafka pods
+          echo ""
+          echo "Kafka pods status:"
+          kubectl get pods -n kafka -l strimzi.io/cluster=kafka-cluster || echo "No Kafka pods found"
 
       - name: Update manifests
         run: |
