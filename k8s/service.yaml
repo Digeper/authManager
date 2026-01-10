@@ -10,9 +10,8 @@ metadata:
     app.kubernetes.io/component: backend
     app.kubernetes.io/part-of: muzika-platform
 spec:
-  type: LoadBalancer
-  loadBalancerSourceRanges:
-    - 20.24.122.172/32
+  type: ClusterIP
+
   ports:
     - name: http
       port: 8091
