@@ -12,10 +12,22 @@ spec:
      - Ingress
      - Egress
   ingress:
+    # Allow from muzika namespace (existing)
     - from:
         - namespaceSelector:
             matchLabels:
               name: muzika
+      ports:
+        - protocol: TCP
+          port: 8091
+    # Allow from ingress-nginx namespace (for ingress controller)
+    - from:
+        - namespaceSelector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values:
+                  - ingress-nginx
       ports:
         - protocol: TCP
           port: 8091
