@@ -53,7 +53,11 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable())
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
+                // Allow health check endpoints without authentication (for Load Balancer and ingress)
+                .requestMatchers("/", "/health", "/actuator/health", "/actuator/**").permitAll()
+                // Allow public registration and login endpoints
                 .requestMatchers("/user", "/login").permitAll()
+                // All other requests require authentication
                 .anyRequest().authenticated()
             );
         return http.build();
