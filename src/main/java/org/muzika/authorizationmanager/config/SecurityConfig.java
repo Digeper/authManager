@@ -27,13 +27,18 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        // Allow frontend IP with both http and https protocols
+        // Allow frontend IPs with both http and https protocols
         configuration.setAllowedOrigins(Arrays.asList(
             "http://20.24.122.172",
             "https://20.24.122.172",
             "http://20.24.122.172:80",
             "http://20.24.122.172:443",
             "https://20.24.122.172:443",
+            "http://20.79.107.3",
+            "https://20.79.107.3",
+            "http://20.79.107.3:80",
+            "http://20.79.107.3:443",
+            "https://20.79.107.3:443",
             "http://localhost", // For local development
             "http://localhost:3000" // For local frontend development
         ));
