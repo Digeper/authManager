@@ -20,7 +20,7 @@ public class AuthorizationController {
         this.authorizationService = authorizationService;
     }
 
-    @PostMapping("/user")
+    @PostMapping({"/user", "/api/auth/user"})
     public ResponseEntity<UserResponse> createUser(@RequestBody CreateUserRequest request) {
         User user = authorizationService.createUser(
             request.getUsername(),
@@ -32,7 +32,7 @@ public class AuthorizationController {
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
-    @PostMapping("/login")
+    @PostMapping({"/login", "/api/auth/login"})
     public ResponseEntity<LoginResponse> login(@RequestBody LoginRequest request) {
         String token = authorizationService.authenticateUser(
             request.getUsername(),
