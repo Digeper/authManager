@@ -47,6 +47,15 @@ spec:
       ports:
         - protocol: TCP
           port: 5432
+    # Frontend IPs (for webhooks/callbacks if needed)
+    - to:
+        - ipBlock:
+            cidr: 20.79.107.3/32
+      ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 443
     # Azure services (Key Vault, ACR, etc.)
     - to:
         - ipBlock:

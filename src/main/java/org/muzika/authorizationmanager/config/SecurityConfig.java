@@ -1,5 +1,6 @@
 package org.muzika.authorizationmanager.config;
 
+import org.muzika.authorizationmanager.filters.JwtAuthenticationFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -8,6 +9,7 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -18,6 +20,12 @@ import java.util.List;
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
+
+    private final JwtAuthenticationFilter jwtAuthenticationFilter;
+
+    public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter) {
+        this.jwtAuthenticationFilter = jwtAuthenticationFilter;
+    }
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -60,11 +68,13 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 // Allow health check endpoints without authentication (for Load Balancer and ingress)
                 .requestMatchers("/", "/health", "/actuator/health", "/actuator/**").permitAll()
-                // Allow public registration and login endpoints
-                .requestMatchers("/user", "/login").permitAll()
+                // Allow public registration and login endpoints (support both direct and /api/auth prefixed paths)
+                .requestMatchers("/user", "/login", "/api/auth/user", "/api/auth/login").permitAll()
                 // All other requests require authentication
                 .anyRequest().authenticated()
-            );
+            )
+            .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+        
         return http.build();
     }
 }
