@@ -35,25 +35,12 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        // Allow frontend IPs with both http and https protocols
-        configuration.setAllowedOrigins(Arrays.asList(
-            "http://20.24.122.172",
-            "https://20.24.122.172",
-            "http://20.24.122.172:80",
-            "http://20.24.122.172:443",
-            "https://20.24.122.172:443",
-            "http://20.79.107.3",
-            "https://20.79.107.3",
-            "http://20.79.107.3:80",
-            "http://20.79.107.3:443",
-            "https://20.79.107.3:443",
-            "http://localhost", // For local development
-            "http://localhost:3000" // For local frontend development
-        ));
+        // Allow all origins (using pattern to support credentials)
+        configuration.setAllowedOriginPatterns(List.of("*"));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
         configuration.setAllowedHeaders(List.of("*")); // Allow all headers
         configuration.setExposedHeaders(List.of("*")); // Expose all headers
-        configuration.setAllowCredentials(true); // Now we can use credentials with specific origins
+        configuration.setAllowCredentials(true); // Allow credentials with all origins
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
         return source;
