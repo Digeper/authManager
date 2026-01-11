@@ -6,8 +6,7 @@ on:
     branches:
       - main
     paths:
-      - 'AuthorizationManager/**'
-      - 'muzikaLib/**'
+      - '**'
       - '.github/workflows/authmanager-deploy.yaml'
   pull_request:
     branches:

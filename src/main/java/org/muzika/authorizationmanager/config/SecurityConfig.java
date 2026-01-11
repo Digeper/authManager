@@ -35,12 +35,12 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        // Allow all origins (using pattern to support credentials)
-        configuration.setAllowedOriginPatterns(List.of("*"));
+        // Allow all origins (JWT tokens don't require CORS credentials)
+        configuration.setAllowedOrigins(List.of("*"));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
         configuration.setAllowedHeaders(List.of("*")); // Allow all headers
         configuration.setExposedHeaders(List.of("*")); // Expose all headers
-        configuration.setAllowCredentials(true); // Allow credentials with all origins
+        configuration.setAllowCredentials(false); // Not needed for JWT tokens
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
         return source;
