@@ -60,6 +60,8 @@ public class SecurityConfig {
                 // Allow health check endpoints without authentication (for Load Balancer and ingress)
                 .requestMatchers("/", "/health", "/actuator/health", "/actuator/**").permitAll()
                 // Allow public registration and login endpoints (support both direct and /api/auth prefixed paths)
+                // Explicitly allow POST for registration and login
+                .requestMatchers(HttpMethod.POST, "/user", "/login", "/api/auth/user", "/api/auth/login").permitAll()
                 .requestMatchers("/user", "/login", "/api/auth/user", "/api/auth/login").permitAll()
                 // All other requests require authentication
                 .anyRequest().authenticated()
