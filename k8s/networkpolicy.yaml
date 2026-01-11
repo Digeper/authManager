@@ -31,6 +31,22 @@ spec:
       ports:
         - protocol: TCP
           port: 8091
+    # Allow Azure Load Balancer health probes (required for Azure infrastructure)
+    - from:
+        - ipBlock:
+            cidr: 168.63.129.16/32
+      ports:
+        - protocol: TCP
+          port: 8091
+    # Allow Azure Virtual Network IP range (adjust CIDR based on your AKS subnet)
+    # Common Azure VNet ranges: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+    # Allow entire cluster network to reach services (Azure infrastructure)
+    - from:
+        - ipBlock:
+            cidr: 10.0.0.0/8
+      ports:
+        - protocol: TCP
+          port: 8091
   egress:
     # DNS
     - to:
