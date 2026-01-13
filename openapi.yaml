@@ -1,0 +1,317 @@
+openapi: 3.1.0
+info:
+  title: AuthorizationManager API
+  description: REST API for the AuthorizationManager service that handles user authentication
+    and management
+  version: 1.0.0
+servers:
+- url: http://localhost:8091
+  description: Generated server url
+security:
+- bearerAuth: []
+tags:
+- name: Authorization
+  description: User authentication and management endpoints
+- name: Health
+  description: Health check endpoints
+paths:
+  /api/auth/user:
+    post:
+      tags:
+      - Authorization
+      summary: Create new user
+      description: Create a new user account with username, password, and optional
+        email
+      operationId: createUser
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+        required: true
+      responses:
+        '201':
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          description: Bad request (validation error, missing required fields, or
+            invalid email format)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '409':
+          description: Conflict (username already exists)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+  /user:
+    post:
+      tags:
+      - Authorization
+      summary: Create new user
+      description: Create a new user account with username, password, and optional
+        email
+      operationId: createUser_1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+        required: true
+      responses:
+        '201':
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          description: Bad request (validation error, missing required fields, or
+            invalid email format)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '409':
+          description: Conflict (username already exists)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+  /login:
+    post:
+      tags:
+      - Authorization
+      summary: User login
+      description: Authenticate user with username and password, returns JWT token
+      operationId: login
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+        required: true
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: Unauthorized (invalid credentials)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+  /api/auth/login:
+    post:
+      tags:
+      - Authorization
+      summary: User login
+      description: Authenticate user with username and password, returns JWT token
+      operationId: login_1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+        required: true
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: Unauthorized (invalid credentials)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+  /health:
+    get:
+      tags:
+      - Health
+      summary: Health check
+      description: Check if the AuthorizationManager service is running
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is UP
+          content:
+            application/json:
+              schema:
+                type: string
+  /:
+    get:
+      tags:
+      - Health
+      summary: Health check
+      description: Check if the AuthorizationManager service is running
+      operationId: health
+      responses:
+        '200':
+          description: Service is UP
+          content:
+            application/json:
+              schema:
+                type: string
+  /user/{id}:
+    delete:
+      tags:
+      - Authorization
+      summary: Delete user
+      description: Delete a user account by UUID
+      operationId: deleteUser
+      parameters:
+      - name: id
+        in: path
+        description: User UUID
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 550e8400-e29b-41d4-a716-446655440000
+      responses:
+        '204':
+          description: User deleted successfully (No Content)
+        '404':
+          description: User not found
+        '500':
+          description: Internal server error
+components:
+  schemas:
+    CreateUserRequest:
+      type: object
+      description: User creation data
+      properties:
+        username:
+          type: string
+          description: Username (alphanumeric, 3-20 characters)
+          example: johndoe
+        password:
+          type: string
+          format: password
+          description: Password (minimum 6 characters)
+          example: securepassword123
+        email:
+          type: string
+          format: email
+          description: Email address (optional)
+          example: john.doe@example.com
+      required:
+      - password
+      - username
+    UserResponse:
+      type: object
+      description: User information response (without password)
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: User UUID
+          example: 550e8400-e29b-41d4-a716-446655440000
+        username:
+          type: string
+          description: Username
+          example: johndoe
+        email:
+          type: string
+          format: email
+          description: User email
+          example: john.doe@example.com
+        createdAt:
+          type: string
+          format: date-time
+          description: User creation timestamp
+          example: '2024-01-01T12:00:00Z'
+        updatedAt:
+          type: string
+          format: date-time
+          description: User last update timestamp
+          example: '2024-01-15T14:30:00Z'
+      required:
+      - createdAt
+      - id
+      - updatedAt
+      - username
+    LoginRequest:
+      type: object
+      description: Login credentials
+      properties:
+        username:
+          type: string
+          description: Username
+          example: johndoe
+        password:
+          type: string
+          format: password
+          description: Password
+          example: securepassword123
+      required:
+      - password
+      - username
+    LoginResponse:
+      type: object
+      description: Login response with JWT token and user information
+      properties:
+        token:
+          type: string
+          description: JWT authentication token
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        userId:
+          type: string
+          format: uuid
+          description: User UUID
+          example: 550e8400-e29b-41d4-a716-446655440000
+        username:
+          type: string
+          description: Username
+          example: johndoe
+        email:
+          type: string
+          format: email
+          description: User email
+          example: john.doe@example.com
+      required:
+      - email
+      - token
+      - userId
+      - username
+  securitySchemes:
+    bearerAuth:
+      type: http
+      description: 'JWT token in format: Bearer {token}'
+      scheme: bearer
+      bearerFormat: JWT
