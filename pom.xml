@@ -16,6 +16,8 @@
     <properties>
         <java.version>17</java.version>
         <jib-maven-plugin.version>3.4.6</jib-maven-plugin.version>
+        <!-- Skip Docker build by default - set skip.docker.build=false to enable -->
+        <skip.docker.build>true</skip.docker.build>
         <!-- ACR_NAME should be replaced with your Azure Container Registry name -->
         <docker.image.registry>${env.ACR_NAME}.azurecr.io</docker.image.registry>
         <docker.image.name>muzika/authmanager</docker.image.name>
@@ -70,6 +72,11 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>2.6.0</version>
+        </dependency>
     </dependencies>
 
     <build>
@@ -92,6 +99,7 @@
                 <artifactId>jib-maven-plugin</artifactId>
                 <version>${jib-maven-plugin.version}</version>
                 <configuration>
+                    <skip>${skip.docker.build}</skip>
                     <from>
                         <image>eclipse-temurin:17-jre</image>
                     </from>
@@ -134,6 +142,27 @@
                         </path>
                     </annotationProcessorPaths>
                 </configuration>
+            </plugin>
+            <!-- SpringDoc OpenAPI Maven Plugin for generating openapi.yaml -->
+            <plugin>
+                <groupId>org.springdoc</groupId>
+                <artifactId>springdoc-openapi-maven-plugin</artifactId>
+                <version>1.4</version>
+                <executions>
+                    <execution>
+                        <id>generate-api-docs</id>
+                        <phase>process-classes</phase>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <apiDocsUrl>http://localhost:${server.port}/api-docs</apiDocsUrl>
+                            <outputFileName>openapi.yaml</outputFileName>
+                            <outputDir>${project.basedir}</outputDir>
+                            <skip>true</skip>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>
